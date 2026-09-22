@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#06131c" />
+    <title>Signal 52 — Two-Player Ocean Mystery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <main id="app">
+      <section id="landing" class="landing">
+        <nav>
+          <div class="brand"><span class="brand-mark">52</span> SIGNAL 52</div>
+          <span class="live-pill"><i></i> TWO-PLAYER LIVE EXPEDITION</span>
+        </nav>
+
+        <div class="hero">
+          <div class="eyebrow">NORTH PACIFIC • OCTOBER 1992</div>
+          <h1>A voice exists where<br /><em>no voice should be.</em></h1>
+          <p class="hero-copy">
+            One player commands the research vessel. The other listens beneath the ocean.
+            Find the source of an unexplained 52 Hz call—before the storm erases its trail.
+          </p>
+          <div class="real-note">
+            <span>BASED ON A REAL MYSTERY</span>
+            The 52-hertz call was first detected in 1989. Its exact source has never been visually confirmed.
+          </div>
+        </div>
+
+        <div class="join-card glass">
+          <label for="name">RESEARCHER NAME</label>
+          <input id="name" maxlength="18" placeholder="Enter your name" autocomplete="off" />
+          <button id="create" class="primary">CREATE EXPEDITION <span>→</span></button>
+          <div class="divider"><span>OR JOIN YOUR PARTNER</span></div>
+          <div class="join-row">
+            <input id="code" maxlength="5" placeholder="ROOM CODE" autocomplete="off" />
+            <button id="join" class="secondary">JOIN</button>
+          </div>
+          <p id="landing-error" class="error"></p>
+        </div>
+      </section>
+
+      <section id="lobby" class="screen hidden">
+        <div class="lobby-card glass">
+          <div class="sonar-logo"><span></span></div>
+          <div class="eyebrow">SECURE EXPEDITION CHANNEL</div>
+          <h2>Partner briefing</h2>
+          <p>Share this code with exactly one partner.</p>
+          <button id="copy-code" class="room-code" title="Copy room code"></button>
+          <div id="crew" class="crew"></div>
+          <div id="role-briefing" class="briefing"></div>
+          <button id="start" class="primary hidden">BEGIN EXPEDITION</button>
+          <p id="waiting">Waiting for second researcher…</p>
+        </div>
+      </section>
+
+      <section id="game" class="screen game hidden">
+        <header class="game-header">
+          <div>
+            <div class="brand small"><span class="brand-mark">52</span> SIGNAL 52</div>
+            <span id="role-label" class="role-label"></span>
+          </div>
+          <div class="mission-status">
+            <span>MISSION TIME</span>
+            <strong id="timer">03:00</strong>
+          </div>
+          <div class="room-mini">ROOM <strong id="room-mini"></strong></div>
+        </header>
+
+        <div class="game-grid">
+          <aside class="panel mission-panel">
+            <span class="panel-title">MISSION LOG</span>
+            <h2 id="mission-title"></h2>
+            <p id="mission-copy"></p>
+            <div class="objective">
+              <i></i>
+              <div><span>SHARED OBJECTIVE</span><strong>Acquire signal, approach within 9 nm, then document.</strong></div>
+            </div>
+            <div id="captain-help" class="help hidden">
+              <b>YOUR ROLE</b>
+              Steer around the storm, deploy hydrophones, and follow your analyst's directions.
+            </div>
+            <div id="analyst-help" class="help hidden">
+              <b>YOUR ROLE</b>
+              Tune the spectrum, read the bearing, and guide the captain toward the call.
+            </div>
+            <div class="comms">
+              <span>LIVE COMMS</span>
+              <p id="message">Channel open.</p>
+            </div>
+          </aside>
+
+          <section class="panel main-console">
+            <div class="console-top">
+              <span class="panel-title" id="console-title"></span>
+              <div class="signal-lock">SIGNAL LOCK <strong id="lock-value">0%</strong></div>
+            </div>
+
+            <div id="captain-console" class="hidden">
+              <div class="ocean-wrap">
+                <canvas id="ocean" width="700" height="500" aria-label="Ocean navigation map"></canvas>
+                <div class="map-legend">
+                  <span><i class="ship-dot"></i>VESSEL</span>
+                  <span><i class="buoy-dot"></i>HYDROPHONE</span>
+                  <span><i class="storm-dot"></i>STORM</span>
+                </div>
+                <div id="guide-arrow" class="guide-arrow">—</div>
+              </div>
+              <div class="helm">
+                <div class="helm-group">
+                  <button data-helm="left" aria-label="Turn left">↶</button>
+                  <button data-helm="up" aria-label="Increase speed">▲</button>
+                  <button data-helm="right" aria-label="Turn right">↷</button>
+                  <button data-helm="down" aria-label="Reduce speed">▼</button>
+                </div>
+                <button id="deploy" class="action-btn">DROP HYDROPHONE <small id="buoy-count">3 REMAINING</small></button>
+                <button id="tag" class="action-btn accent">DOCUMENT SOURCE <small>LOCK 55% + RANGE 9 NM</small></button>
+              </div>
+            </div>
+
+            <div id="analyst-console" class="hidden">
+              <div class="spectrum-wrap">
+                <canvas id="spectrum" width="700" height="300" aria-label="Live acoustic spectrum"></canvas>
+                <div class="scanline"></div>
+              </div>
+              <div class="tuner">
+                <div class="frequency-readout"><strong id="frequency-value">47</strong><span>Hz</span></div>
+                <input id="frequency" type="range" min="15" max="80" value="47" />
+                <button id="scan" class="primary">ANALYZE FREQUENCY</button>
+              </div>
+              <div class="analyst-bottom">
+                <div>
+                  <span class="panel-title">RECENT READINGS</span>
+                  <div id="readings" class="readings"><p>No usable signal yet.</p></div>
+                </div>
+                <div>
+                  <span class="panel-title">SEND COURSE</span>
+                  <div id="directions" class="directions">
+                    <button data-dir="NW">↖</button><button data-dir="N">↑</button><button data-dir="NE">↗</button>
+                    <button data-dir="W">←</button><button data-dir="HOLD">•</button><button data-dir="E">→</button>
+                    <button data-dir="SW">↙</button><button data-dir="S">↓</button><button data-dir="SE">↘</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="panel telemetry">
+            <span class="panel-title">EXPEDITION DATA</span>
+            <div class="metric"><span>VESSEL SPEED</span><strong id="speed">0.0 kn</strong></div>
+            <div class="metric"><span>FUEL</span><strong id="fuel">100%</strong><div><i id="fuel-bar"></i></div></div>
+            <div class="metric"><span>HULL</span><strong id="hull">100%</strong><div><i id="hull-bar"></i></div></div>
+            <div class="metric"><span>HYDROPHONES</span><strong id="hydrophones">0 / 3</strong></div>
+            <div class="score"><span>RESEARCH SCORE</span><strong id="score">1000</strong></div>
+            <div class="fact">
+              <b>FIELD NOTE</b>
+              Water carries sound about four times faster than air. Multiple hydrophones make direction estimates more reliable.
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="result" class="screen hidden">
+        <div class="result-card glass">
+          <div id="result-icon" class="result-icon">◉</div>
+          <div class="eyebrow">EXPEDITION COMPLETE</div>
+          <h2 id="result-title"></h2>
+          <p id="result-copy"></p>
+          <div class="final-score"><span>FINAL RESEARCH SCORE</span><strong id="final-score"></strong></div>
+          <div class="truth">
+            <b>THE REAL MYSTERY</b>
+            Scientists tracked the unusual call for years, but “the loneliest whale” remains a nickname—not a proven fact.
+            Evidence suggests it may be a healthy blue–fin hybrid, and there may be more than one.
+          </div>
+          <button id="again" class="primary hidden">LAUNCH ANOTHER EXPEDITION</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/game.js"></script>
+  </body>
+</html>
