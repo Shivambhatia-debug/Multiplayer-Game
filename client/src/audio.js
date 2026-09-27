@@ -179,6 +179,19 @@ export class Sound {
       case 'lose':
         [392, 349, 311, 262].forEach((f, i) => this.tone(f, 0.9, { type: 'triangle', vol: 0.1, delay: i * 0.25 }));
         break;
+      case 'hurt':
+        this.noise(0.18, { vol: 0.25 * v, freq: 700 });
+        this.tone(140, 0.2, { type: 'square', vol: 0.07 * v, slide: 70 });
+        break;
+      case 'down':
+        [330, 262, 196].forEach((f, i) => this.tone(f, 0.5, { type: 'sawtooth', vol: 0.07, delay: i * 0.18 }));
+        break;
+      case 'spit':
+        this.noise(0.3, { vol: 0.15 * v, freq: 2600 });
+        break;
+      case 'type':
+        this.tone(1200, 0.04, { type: 'square', vol: 0.03 });
+        break;
       case 'win':
         [392, 494, 587, 784, 988].forEach((f, i) => this.tone(f, 1.6, { type: 'triangle', vol: 0.1, delay: i * 0.14 }));
         break;

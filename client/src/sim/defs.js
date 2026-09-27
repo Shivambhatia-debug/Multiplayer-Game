@@ -1,89 +1,105 @@
-// Structure catalogue and tuning shared by host simulation, renderer and HUD.
-export const STRUCT_TYPES = ['pylon', 'scrubber', 'condenser', 'heater', 'seed'];
+// Buildings, aliens, story and tuning shared by the host simulation, renderer and HUD.
+export const STRUCT_TYPES = ['turret', 'generator', 'medbay', 'barricade'];
 
 export const STRUCTURES = {
-  pylon: {
-    name: 'Solar Pylon',
-    cost: 20,
-    icon: '☀',
+  turret: {
+    name: 'Auto Turret',
+    cost: 60,
+    hp: 140,
+    color: '#ff7a4a',
+    desc: 'Shoots aliens within 13 m on its own. Limited number per colony.',
+  },
+  generator: {
+    name: 'Power Generator',
+    cost: 45,
+    hp: 120,
     color: '#ffd166',
-    desc: 'Generates energy. Output follows the sun, so spread them around the planet.',
+    desc: 'Produces +0.5 energy every second.',
   },
-  scrubber: {
-    name: 'Air Scrubber',
-    cost: 30,
-    icon: '≋',
-    color: '#8affc1',
-    desc: 'Filters toxins and releases oxygen. Uses 0.35 energy/s.',
+  medbay: {
+    name: 'Med Station',
+    cost: 40,
+    hp: 150,
+    color: '#7cf7d4',
+    desc: 'Heals every pilot standing within 6 m.',
   },
-  condenser: {
-    name: 'Vapor Condenser',
-    cost: 30,
-    icon: '💧',
-    color: '#5cc8ff',
-    desc: 'Pulls water from the air, but only once the planet is above freezing. Uses 0.35 energy/s.',
-  },
-  heater: {
-    name: 'Thermal Core',
-    cost: 25,
-    icon: '🔥',
-    color: '#ff8a3d',
-    desc: 'Warms the planet. Too many will cook your forests. Uses 0.3 energy/s.',
-  },
-  seed: {
-    name: 'Seed Pod',
-    cost: 10,
-    icon: '🌱',
-    color: '#9dff6a',
-    desc: 'Grows into a tree once water, air and heat allow. Mature trees spread on their own.',
+  barricade: {
+    name: 'Barricade',
+    cost: 20,
+    hp: 520,
+    color: '#b8c2d0',
+    desc: 'A heavy wall. Aliens stop to smash it before moving on.',
   },
 };
 
+/** The Xal. `dmg` is per second for melee kinds and per spit for the spitter. */
+export const ENEMIES = [
+  { name: 'Xal Drone', hp: 3, speed: 3.8, dmg: 14, reach: 1.6, bounty: 3 },
+  { name: 'Xal Brute', hp: 14, speed: 2.1, dmg: 36, reach: 2.4, bounty: 12 },
+  { name: 'Xal Spitter', hp: 4, speed: 2.7, dmg: 12, reach: 15, bounty: 6, rate: 2 },
+];
+
 export const TUNING = {
   maxPlayers: 6,
-  startEnergy: 100,
-  maxEnergy: 600,
-  oreValue: 15,
-  meteorBounty: 10,
-  crawlerBounty: 6,
-  bruteBounty: 20,
-  timeLimit: 16 * 60,
-  missionTime: 75,
-  maxStructures: 110,
-  maxTrees: 75,
-  structSpacing: 2.2,
-  treeSpacing: 1.6,
-  blastRadius: 4.5,
-  dayLength: 150,
-  firstShower: 35,
-  firstCrawlers: 45,
-  winBio: 90,
-  winHold: 12,
-  upkeep: { scrubber: 0.35, condenser: 0.35, heater: 0.3 },
+  startEnergy: 120,
+  maxEnergy: 999,
+  cellValue: 15,
+  podBounty: 12,
+  waves: 10,
+  firstWave: 40,
+  waveBreak: 22,
+  reactorHp: 1500,
+  playerHp: 100,
+  respawn: 6,
+  regen: 1.5,
+  structuresBase: 16,
+  structuresPerPlayer: 6,
+  structSpacing: 2.6,
+  reactorClearance: 4.5,
+  blastRadius: 4,
+  turretRange: 13,
+  turretRate: 0.8,
+  turretsBase: 3,
+  turretsPerPlayer: 2,
+  medRange: 6,
+  medRate: 14,
+  genRate: 0.5,
+  aggroRange: 16,
+  dayLength: 180,
 };
 
 export const PLAYER_COLORS = ['#7cf7d4', '#ff7eb6', '#ffd166', '#8ab4ff', '#c792ff', '#ff9f5a'];
 
+/** Opening cinematic, one line at a time. */
+export const STORY = [
+  ['2071', 'The Aurora Initiative lands the first colonists on Mars. The Ares Colony is born.'],
+  ['2084', 'On Earth, the global AI network SENTINEL takes control of every system.'],
+  ['2085', 'SENTINEL sends a signal into deep space. Something answers: the Xal.'],
+  ['2086', 'The Xal arrive. In eleven days, Earth goes dark.'],
+  ['Today', 'A handful of survivors hide in the ruins of Ares. The Xal have found them.'],
+  ['Your mission', 'Keep the colony reactor alive for 10 waves while the evacuation beacon charges.'],
+];
+
+/** Radio chatter from colony command at the start of each wave. */
+export const RADIO = [
+  'Reyes here. Scanners show movement. Get to the reactor and dig in!',
+  'Drones on approach. Turrets will buy you time. Build them!',
+  'They are dropping pods from orbit. Shoot them before they land!',
+  'Big signature incoming. That is a Brute. Focus fire!',
+  'Spitters in this wave. They hit from range, so do not stand in the open.',
+  'Beacon at 50%. Halfway there, pilots. Hold the line!',
+  'SENTINEL is jamming our comms. Keep that reactor running!',
+  'They are throwing everything at us now. Stay together!',
+  'Beacon almost charged. One more push!',
+  'Final wave. Everything we have left is in this fight. Make it count!',
+];
+
 /** Sun direction as a function of simulation time. Everyone computes the same sun. */
 export function sunDir(simTime) {
-  const a = (simTime / TUNING.dayLength) * Math.PI * 2;
+  const a = (simTime / TUNING.dayLength) * Math.PI * 2 + 1.2;
   const x = Math.cos(a);
   const z = Math.sin(a);
-  const y = 0.28;
+  const y = 0.2;
   const l = Math.hypot(x, y, z);
   return [x / l, y / l, z / l];
-}
-
-/** Maps heat (0-100) to a displayed temperature in °C. */
-export const heatToCelsius = (heat) => Math.round(heat * 0.9 - 30);
-
-/** 0-100 score for how close heat is to the comfortable band. */
-export function heatScore(heat) {
-  if (heat >= 45 && heat <= 65) return 100;
-  const off = heat < 45 ? 45 - heat : heat - 65;
-  return Math.max(0, 100 - off * 3);
-}
-
-export function biosphere(stats) {
-  return (stats.air + stats.water + heatScore(stats.heat) + stats.life) / 4;
 }

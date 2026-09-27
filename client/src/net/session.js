@@ -2,7 +2,7 @@ import { World } from '../sim/world.js';
 
 const TICK_INTERVAL = 0.2;
 const WORLD_MIN_INTERVAL = 0.25;
-const GROWTH_INTERVAL = 1;
+const HP_SYNC_INTERVAL = 1;
 
 /**
  * Glue between a transport and the simulation. The earliest player in the room is
@@ -24,8 +24,8 @@ export class Session {
     this.tickAcc = 0;
     this.worldAcc = 0;
     this.sentVersion = -1;
-    this.growthAcc = 0;
-    /** Where the local player stands; set by the game loop so the host can spawn crystals nearby. */
+    this.hpAcc = 0;
+    /** Where the local player stands; set by the game loop so the host can run combat against it. */
     this.localDir = null;
 
     this.onMembers = () => {};
@@ -157,9 +157,13 @@ export class Session {
       world.simTime += dt;
       return;
     }
-    const dirs = [...this.remotes.values()].map((p) => p.d).filter(Array.isArray);
-    if (this.localDir) dirs.push(this.localDir);
-    this.emitEvents(world.step(dt, Math.max(1, this.members.length), dirs));
+    // Every connected pilot, with their latest position (null while downed or not yet posed).
+    const players = this.members.map((m) => {
+      if (m.id === this.me.id) return { id: m.id, dir: this.localDir };
+      const pose = this.remotes.get(m.id);
+      return { id: m.id, dir: Array.isArray(pose?.d) ? pose.d : null };
+    });
+    this.emitEvents(world.step(dt, players));
     if (this.solo) return;
 
     this.tickAcc += dt;
@@ -168,14 +172,14 @@ export class Session {
       this.tickAcc = 0;
       this.transport.send(world.serializeTick());
     }
-    this.growthAcc += dt;
+    this.hpAcc += dt;
     const structural = world.version !== this.sentVersion;
-    const growth = world.growthDirty && this.growthAcc >= GROWTH_INTERVAL;
-    if (this.worldAcc >= WORLD_MIN_INTERVAL && (structural || growth)) {
+    const hpChanged = world.hpDirty && this.hpAcc >= HP_SYNC_INTERVAL;
+    if (this.worldAcc >= WORLD_MIN_INTERVAL && (structural || hpChanged)) {
       this.worldAcc = 0;
       this.sentVersion = world.version;
-      this.growthAcc = 0;
-      world.growthDirty = false;
+      this.hpAcc = 0;
+      world.hpDirty = false;
       this.transport.send(world.serializeWorld());
     }
   }

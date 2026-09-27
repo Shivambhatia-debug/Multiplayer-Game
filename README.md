@@ -1,49 +1,52 @@
-# Seedfall
+# ARES: Last Colony
 
-**A co-op 3D terraforming simulation for 1–6 players.** You land on a tiny planet that is frozen, toxic and dry. Your team builds machines, mines energy, plants forests and shoots down meteors until the planet can support life on its own.
+**A co-op 3D alien-invasion survival game for 1–6 players.**
 
-- Walk a 50 m-radius planet with round-planet gravity. From the ground you see a real sky with sunrises, sunsets and stars, plus atmospheric haze, rocky terrain, grass and a day/night cycle driven by a moving sun.
-- A compass strip across the top shows your heading and marks meteors, crawlers and nearby crystals with their distance.
-- The simulation reacts: oceans rise and flood low ground, clouds form, the sky turns from toxic orange to blue, snow melts and grass spreads out from your trees.
-- Room codes and invite links, a lobby, and drop-in/drop-out play. If the host leaves, another player takes over and the game keeps going.
-- Everything is procedural: no downloaded models, textures or sound files. The audio is synthesized with WebAudio and the soundtrack brightens as the planet heals.
+> **2071:** The Aurora Initiative founds the Ares Colony on Mars.
+> **2084:** On Earth, the AI network SENTINEL seizes control.
+> **2085:** SENTINEL signals deep space, and the alien Xal answer.
+> **2086:** Earth goes dark.
+> **Today:** The last humans hide in the ruins of Ares. The Xal have found them.
+
+**Your mission:** keep the colony **reactor** alive through **10 waves** of the Xal while the evacuation beacon charges. If the reactor falls, humanity falls with it.
+
+- Walk the ruins of a Mars colony: habitat domes, experiment labs with flickering lights and specimen tanks, a comms tower, cargo containers, wrecked rovers and street lamps. Buildings block movement and the camera.
+- A dusty butterscotch Martian sky with blue sunsets, night stars and the moons Phobos and Deimos.
+- Every pilot has **health**. The Xal attack pilots, buildings and the reactor. A downed pilot respawns at the reactor after 6 seconds.
+- The compass and radar show aliens, drop pods, power cells and the way home to the reactor.
+- Room codes, invite links, drop-in/drop-out play and host migration. Everything is procedural, with no downloaded models, textures or sounds.
 
 ## How to play
 
 | Key | Action |
 | --- | --- |
 | `W A S D` | Move (`Shift` sprints, `Space` jumps, hold `Space` in the air for the jetpack) |
-| Mouse | Look around (click the planet to lock the mouse) |
-| `1`–`5` | Pick a structure, then **click** (or `E`) to build it |
-| Click (nothing selected) | Shoot meteors and crawlers. Aim assist locks on when the crosshair turns red |
+| Mouse | Look around (click the screen to lock the mouse) |
+| `1`–`4` | Pick a defence, then **click** (or `E`) to build it |
+| Click (nothing selected) | Shoot. Aim assist locks on when the crosshair turns red |
 | Right click / `Esc` | Cancel building |
-| `X` | Salvage the nearest structure (50% refund) |
+| `X` | Salvage the nearest defence (50% refund) |
 | `Q` | Ping a spot for your team |
 | `H` / `M` | Field manual / mute |
 
-**Goal:** hold the Biosphere index at **90% or higher for 12 seconds** before the colony ship arrives (16 minutes). The index is the average of Air, Water, Heat comfort and Life. If time runs out, the mission fails. Finish in under 8 minutes for gold and under 12 for silver.
-
-| Structure | Cost | What it does |
+| Defence | Cost | What it does |
 | --- | --- | --- |
-| ☀ Solar Pylon | 20 | Makes energy. Output follows the sun, so spread pylons around the planet |
-| ≋ Air Scrubber | 30 | Raises Air. Uses 0.35 energy/s |
-| 💧 Vapor Condenser | 30 | Raises Water, but only once the planet is above freezing. Uses 0.35 energy/s |
-| 🔥 Thermal Core | 25 | Raises Heat. Too many will cook your forests. Uses 0.3 energy/s |
-| 🌱 Seed Pod | 10 | Grows into a tree. Mature trees add oxygen and spread on their own |
+| Auto Turret | 60 | Shoots aliens within 13 m on its own. Limited to 3 + 2 per pilot |
+| Power Generator | 45 | +0.5 energy per second |
+| Med Station | 40 | Heals pilots standing within 6 m |
+| Barricade | 20 | 520 HP wall. Aliens stop to smash it |
 
-Meteor showers arrive every 35–55 seconds, and red rings on the ground show where each meteor will land. An impact destroys everything inside its ring, but it also brings heat and ice. Walk into the cyan crystals to mine shared energy.
+**Energy** is shared by the team. You earn it from glowing power cells (walk into them), from alien and pod kills (turret kills give nothing) and from a bonus for each cleared wave.
 
-**Blight crawlers** start appearing after about 45 seconds. They walk to your nearest machine and eat it, and every living crawler poisons the air. A crawler dies in 2 shots and a brute in 5. Waves get bigger over time, and the radar in the bottom-left corner shows crawlers in purple and meteor targets in red.
-
-**Bounties** are short missions such as "Destroy 4 threats" or "Plant 5 Seed Pods". Each one has a 75-second timer and pays a large energy reward. Kill streaks, floating energy numbers and banners show your progress.
+**The Xal:** *Drones* are fast and weak. *Brutes* (from wave 2) are slow and hit very hard. *Spitters* (from wave 3) spit acid from 15 m away. *Drop pods* (from wave 2) fall from orbit onto a red ring. Shoot them before they land, or they release three drones and damage everything nearby. Aliens attack the nearest pilot within 16 m, then nearby buildings, then the reactor. Later waves are bigger and tougher.
 
 ## Architecture
 
 ```
 ┌─────────────── Netlify (static) ────────────────┐        ┌──────── Vercel (serverless) ────────┐
 │ client/  Vite + three.js                         │  HTTPS │ server/api/config.js   which transport│
-│  ├ sim/     deterministic planet simulation      │ ─────► │ server/api/token.js    Ably tokens    │
-│  ├ render/  terrain, water, clouds, bloom, FX    │        │ server/api/rooms/[code].js  lookup    │
+│  ├ sim/     waves, aliens, combat, colony layout │ ─────► │ server/api/token.js    Ably tokens    │
+│  ├ render/  Mars terrain, ruins, sky, bloom, FX  │        │ server/api/rooms/[code].js  lookup    │
 │  ├ net/     Session (host logic) + transports    │        └──────────────────────────────────────┘
 │  └ game/    sphere-walking controller, input     │                       │ API key stays here
 └──────────────────────────────────────────────────┘                       ▼
@@ -56,8 +59,8 @@ Meteor showers arrive every 35–55 seconds, and red rings on the ground show wh
 
 **Netcode (host-authoritative):**
 
-- The first player in a room is the **host**. The host steps the simulation and broadcasts a tick (stats and meteors) 5 times a second. It sends the world (structures and crystals) only when something changes.
-- Every other client mirrors that state. Players send build, mine, shoot and salvage *requests*, and the host validates them. Energy, spacing, water level and structure caps are all checked on the host.
+- The first player in a room is the **host**. The host runs the waves, alien AI, turrets and all damage, and broadcasts a tick (reactor, energy, pilot health, aliens and pods) 5 times a second. It sends the world (defences and power cells) only when something changes.
+- Every other client mirrors that state. Players send build, mine, shoot and salvage *requests*, and the host validates them. Energy, spacing, ruins, turret and building caps are all checked on the host.
 - Each client moves its own avatar and broadcasts its pose 5–12 times a second, depending on room size. Poses are only sent when they change, and remote avatars are smoothed.
 - **Host migration:** presence decides the host (earliest `joinedAt`). If the host leaves, the next player already holds a mirrored copy of the world and continues stepping it.
 - Terrain is generated from a shared seed, so it never has to be sent over the network.
@@ -111,10 +114,10 @@ A 4-player, 10-minute match uses roughly 80–100k Ably messages, because every 
 client/                    Netlify site
   index.html               menus, lobby, HUD, overlays
   src/main.js              app flow, input → actions, game loop
-  src/sim/                 world.js (simulation + snapshots), terrain.js, defs.js (tuning), noise.js, vec.js
   src/net/                 session.js (host logic), transports.js (Ably / WS / local), api.js
-  src/render/              scene.js (lights, water, clouds, bloom), terrainView.js (ground, rocks, grass),
-                           sky.js (sky dome + fog colours), models.js, fx.js
+  src/sim/                 world.js (waves, aliens, combat), ruins.js (colony layout), defs.js (units + story)
+  src/render/              scene.js (lights, reactor, aliens, turrets), terrainView.js (Mars ground, rocks),
+                           ruinsView.js (domes, labs, tanks, tower), sky.js, models.js, fx.js
   src/game/                controller.js (sphere movement + camera), input.js
   src/ui/hud.js            HUD, objectives, toasts
   src/audio.js             procedural music and sound effects
@@ -127,8 +130,8 @@ netlify.toml               Netlify build config
 ## Roadmap to the next level
 
 1. **Touch controls** for phones (virtual stick, tap to build, auto-fire), plus a quality toggle that turns off shadows and bloom on weak GPUs.
-2. **Planet biomes and events:** volcanic, ocean and ice worlds, plus dust storms that cut solar output and acid rain that corrodes machines.
-3. **Roles:** Engineer (cheaper builds), Botanist (faster trees), Gunner (bigger aim assist). This gives each player a reason to coordinate.
-4. **Persistence:** an Upstash Redis leaderboard (through the Vercel Marketplace) of fastest terraforms per player count, and screenshots of the finished planet you can share.
-5. **Spectator and replay:** move the host onto a fixed timestep. A replay then only needs the seed plus a timestamped action log.
+2. **Story missions:** explore abandoned labs between waves for data logs about SENTINEL and upgrades.
+3. **Weapons and classes:** Engineer (repairs, cheaper turrets), Medic (heal beam), Heavy (shotgun). This gives each player a reason to coordinate.
+4. **Boss wave:** a Xal mothership that must be shot down from the comms tower.
+5. **Persistence:** an Upstash Redis leaderboard (through the Vercel Marketplace) of highest wave reached per player count.
 6. **Server-side validation:** if the game grows public, move the host simulation into a Durable Object or a small Fly.io service so no player can cheat as host.

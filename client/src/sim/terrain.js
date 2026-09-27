@@ -3,10 +3,14 @@ import { randomDir, dot } from './vec.js';
 
 export const PLANET_RADIUS = 50;
 
-/** Radius of the ocean surface for a given water percentage. */
-export function waterRadius(water) {
-  return PLANET_RADIUS - 4.4 + (water / 100) * 3.6;
-}
+/** Where the Ares colony (and its reactor) stands. The ground there is levelled. */
+export const BASE_DIR = (() => {
+  const v = [0.28, 0.92, 0.27];
+  const l = Math.hypot(...v);
+  return v.map((x) => x / l);
+})();
+const BASE_FLAT = 0.42; // radians of flattened ground around the colony (~21 m)
+const BASE_HEIGHT = 1.2;
 
 /**
  * Deterministic planet heightfield. `height(dir)` returns the offset from PLANET_RADIUS.
@@ -44,10 +48,18 @@ export function createTerrain(seed) {
     let h = continent * 4.2 + hills * 1.6 + ridge * highland * 4.2 - 1;
     for (const c of craters) {
       const d = Math.acos(Math.min(1, dot(dir, c.dir)));
+      if (Math.acos(Math.min(1, dot(c.dir, BASE_DIR))) < BASE_FLAT * 1.6) continue;
       if (d < c.size * 1.35) {
         const t = d / c.size;
         h += t < 1 ? -c.depth * (1 - t * t) : c.depth * 0.6 * Math.sin(((t - 1) / 0.35) * Math.PI);
       }
+    }
+    // Level a plateau for the colony, blending smoothly into the surrounding land.
+    const fromBase = Math.acos(Math.min(1, dot(dir, BASE_DIR)));
+    if (fromBase < BASE_FLAT * 1.8) {
+      const t = Math.min(1, Math.max(0, (fromBase - BASE_FLAT) / (BASE_FLAT * 0.8)));
+      const k = t * t * (3 - 2 * t);
+      h = BASE_HEIGHT + (h - BASE_HEIGHT) * k;
     }
     return h;
   }

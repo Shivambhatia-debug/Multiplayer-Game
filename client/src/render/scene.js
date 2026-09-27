@@ -4,39 +4,29 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { PLANET_RADIUS as R } from '../sim/terrain.js';
-import { createNoise3D } from '../sim/noise.js';
 import { sunDir, TUNING } from '../sim/defs.js';
-import { meteorPos } from '../sim/world.js';
+import { podPos } from '../sim/world.js';
 import {
   buildStructure,
   buildGhost,
-  buildOre,
-  buildMeteor,
+  buildCell,
+  buildPod,
   buildWarning,
   buildAvatar,
-  buildCrawler,
-  setGridPower,
+  buildAlien,
+  buildReactor,
   hash01,
 } from './models.js';
 import { Effects } from './fx.js';
 import { SkyDome } from './sky.js';
 import { TerrainView } from './terrainView.js';
+import { RuinsView } from './ruinsView.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
-// Clouds hug the planet in orbit views and sit above the camera when playing.
-const CLOUD_ORBIT_R = R + 6;
-const CLOUD_PLAY_R = R + 18;
 const tmpV = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion();
 const tmpM = new THREE.Matrix4();
-
-const C = (hex) => new THREE.Color(hex);
-const PALETTE = {
-  atmoToxic: C(0xff8c3a),
-  atmoClean: C(0x5aa8ff),
-  oceanToxic: C(0x4f7a3a),
-  oceanClean: C(0x1766b0),
-};
 
 function easeOutBack(k) {
   const c1 = 1.70158;
@@ -52,40 +42,11 @@ function orient(obj, dir, radius, yaw = 0) {
   if (yaw) obj.quaternion.multiply(tmpQ.setFromAxisAngle(UP, yaw));
 }
 
-function cloudTexture() {
-  const w = 512;
-  const h = 256;
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(w, h);
-  const n = createNoise3D(7);
-  for (let y = 0; y < h; y++) {
-    const lat = (y / h) * Math.PI;
-    for (let x = 0; x < w; x++) {
-      const lon = (x / w) * Math.PI * 2;
-      const px = Math.sin(lat) * Math.cos(lon);
-      const py = Math.cos(lat);
-      const pz = Math.sin(lat) * Math.sin(lon);
-      let v = 0;
-      let a = 1;
-      let f = 2;
-      for (let o = 0; o < 4; o++) {
-        v += n(px * f, py * f, pz * f) * a;
-        a *= 0.5;
-        f *= 2;
-      }
-      const alpha = Math.max(0, Math.min(1, (v - 0.12) * 2.6));
-      const i = (y * w + x) * 4;
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
-      img.data[i + 3] = alpha * 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+/** Orients `obj` upright at `up`, facing tangent direction `fwd`. */
+function face(obj, up, fwd) {
+  const right = tmpV2.crossVectors(up, fwd).normalize();
+  tmpM.makeBasis(right, up, fwd);
+  obj.quaternion.setFromRotationMatrix(tmpM);
 }
 
 function glowTexture(inner, outer) {
@@ -121,9 +82,10 @@ export class GameRenderer {
 
     this.buildLights();
     this.buildSky();
-    this.buildPlanetShells();
+    this.buildAtmosphere();
     this.sky = new SkyDome(this.scene);
     this.terrainView = new TerrainView(this.scene);
+    this.ruinsView = new RuinsView(this.scene);
     this.fog = new THREE.FogExp2(0x000000, 0.01);
     this.mode = null;
 
@@ -131,16 +93,17 @@ export class GameRenderer {
     this.entities = new THREE.Group();
     this.scene.add(this.entities);
     this.structs = new Map();
-    this.ores = new Map();
-    this.meteors = new Map();
-    this.creatures = new Map();
+    this.cells = new Map();
+    this.pods = new Map();
+    this.enemies = new Map();
     this.avatars = new Map();
+    this.reactor = null;
     this.ghost = null;
     this.ghostType = null;
     this.seed = null;
-    this.colorTimer = 0;
     this.shake = 0;
     this.clock = 0;
+    this.night = 0;
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -162,23 +125,17 @@ export class GameRenderer {
   }
 
   buildLights() {
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.4);
+    this.sun = new THREE.DirectionalLight(0xffe2c4, 2.4);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    const sc = this.sun.shadow.camera;
-    sc.left = sc.bottom = -R - 6;
-    sc.right = sc.top = R + 6;
-    sc.near = 20;
-    sc.far = 180;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
     this.fill = new THREE.DirectionalLight(0x6b8cff, 0.35);
     this.scene.add(this.fill);
-    this.ambient = new THREE.AmbientLight(0x4a5878, 0.55);
+    this.ambient = new THREE.AmbientLight(0x5a4a48, 0.55);
     this.scene.add(this.ambient);
-    // Sky light from above and bounce light from the ground, oriented to the local up.
-    this.hemi = new THREE.HemisphereLight(0x88aaff, 0x3a2a1a, 0);
+    this.hemi = new THREE.HemisphereLight(0xd9a070, 0x3a2016, 0);
     this.scene.add(this.hemi);
     this.headlamp = new THREE.PointLight(0xffe2b8, 0, 18, 1);
     this.scene.add(this.headlamp);
@@ -191,8 +148,7 @@ export class GameRenderer {
     for (let i = 0; i < count; i++) {
       const v = new THREE.Vector3().randomDirection().multiplyScalar(900 + Math.random() * 300);
       pos.set([v.x, v.y, v.z], i * 3);
-      const t = Math.random();
-      const c = new THREE.Color().setHSL(0.55 + t * 0.15, 0.4, 0.65 + Math.random() * 0.35);
+      const c = new THREE.Color().setHSL(0.55 + Math.random() * 0.15, 0.4, 0.65 + Math.random() * 0.35);
       col.set([c.r, c.g, c.b], i * 3);
     }
     const g = new THREE.BufferGeometry();
@@ -222,55 +178,29 @@ export class GameRenderer {
       }),
     );
     this.sunSprite.material.color.setScalar(3);
-    this.sunSprite.scale.setScalar(110);
+    this.sunSprite.scale.setScalar(80);
     this.scene.add(this.sunSprite);
 
-    // A distant moon for scale and silhouette.
-    const moon = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(22, 3),
-      new THREE.MeshStandardMaterial({ color: 0x9a9fb3, flatShading: true, roughness: 1, fog: false }),
-    );
-    moon.position.set(-420, 180, -560);
-    this.scene.add(moon);
-    this.moon = moon;
+    // Phobos and Deimos: two small, lumpy moons.
+    const moonMat = new THREE.MeshStandardMaterial({ color: 0x8a7d72, flatShading: true, roughness: 1, fog: false });
+    this.moons = [
+      { mesh: new THREE.Mesh(new THREE.IcosahedronGeometry(16, 1), moonMat), dist: 520, speed: 0.05, tilt: 0.3, scale: [1.3, 0.9, 1] },
+      { mesh: new THREE.Mesh(new THREE.IcosahedronGeometry(9, 1), moonMat), dist: 760, speed: 0.02, tilt: -0.5, scale: [1, 0.8, 1.1] },
+    ];
+    for (const m of this.moons) {
+      m.mesh.scale.set(...m.scale);
+      this.scene.add(m.mesh);
+    }
   }
 
-  buildPlanetShells() {
-    this.ocean = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 192, 128),
-      new THREE.MeshPhysicalMaterial({
-        color: PALETTE.oceanClean,
-        roughness: 0.12,
-        metalness: 0.05,
-        transparent: true,
-        opacity: 0.84,
-        clearcoat: 1,
-        clearcoatRoughness: 0.2,
-      }),
-    );
-    this.ocean.receiveShadow = true;
-    this.scene.add(this.ocean);
-
-    this.clouds = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 64, 48),
-      new THREE.MeshStandardMaterial({
-        map: cloudTexture(),
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        roughness: 1,
-      }),
-    );
-    this.scene.add(this.clouds);
-
+  buildAtmosphere() {
     this.atmoUniforms = {
-      uColor: { value: PALETTE.atmoToxic.clone() },
+      uColor: { value: new THREE.Color(0xff9a5a) },
       uSun: { value: new THREE.Vector3(1, 0, 0) },
-      uStrength: { value: 1 },
+      uStrength: { value: 1.1 },
     };
     this.atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.25, 96, 64),
+      new THREE.SphereGeometry(R * 1.2, 96, 64),
       new THREE.ShaderMaterial({
         uniforms: this.atmoUniforms,
         vertexShader: /* glsl */ `
@@ -303,26 +233,34 @@ export class GameRenderer {
     this.scene.add(this.atmosphere);
   }
 
-  /** Rebuilds the terrain mesh when the planet seed changes. */
+  /** Rebuilds terrain, ruins and the reactor when the planet seed changes. */
   setWorld(world) {
     if (world.seed === this.seed) return;
     this.seed = world.seed;
-    for (const map of [this.structs, this.ores, this.meteors, this.creatures]) {
+    for (const map of [this.structs, this.cells, this.pods, this.enemies]) {
       for (const entry of map.values()) {
         this.entities.remove(entry.obj);
         if (entry.warn) this.entities.remove(entry.warn);
       }
       map.clear();
     }
-
     this.terrainView.build(world);
-    this.terrainMesh = this.terrainView.mesh;
-    this.colorTimer = 0;
-    this.paintTerrain(world);
-  }
-
-  paintTerrain(world) {
     this.terrainView.paint(world);
+    this.terrainMesh = this.terrainView.mesh;
+    this.ruinsView.build(world);
+    if (this.reactor) this.entities.remove(this.reactor.obj);
+    const obj = buildReactor();
+    obj.traverse((o) => {
+      if (o.isMesh) o.castShadow = true;
+    });
+    orient(obj, world.baseDir, world.terrain.surfaceRadius(world.baseDir) - 0.1);
+    this.entities.add(obj);
+    this.reactor = {
+      obj,
+      core: obj.getObjectByName('core'),
+      rings: [obj.getObjectByName('ring0'), obj.getObjectByName('ring1')],
+      beacon: obj.getObjectByName('beacon'),
+    };
   }
 
   surfaceAt(dir) {
@@ -338,7 +276,7 @@ export class GameRenderer {
     this.sky.mesh.visible = surface;
     this.atmosphere.visible = !surface;
     const sc = this.sun.shadow.camera;
-    const half = surface ? 42 : R + 10;
+    const half = surface ? 45 : R + 10;
     sc.left = sc.bottom = -half;
     sc.right = sc.top = half;
     sc.near = surface ? 1 : 20;
@@ -356,93 +294,101 @@ export class GameRenderer {
     for (const st of world.structures.values()) {
       let entry = this.structs.get(st.id);
       if (!entry || entry.type !== st.type) {
-        const obj = buildStructure(st.type, st.id);
+        const obj = buildStructure(st.type);
         orient(obj, st.dir, world.terrain.surfaceRadius(st.dir) - 0.05, hash01(st.id) * Math.PI * 2);
         this.entities.add(obj);
         entry = {
           obj,
           type: st.type,
           born: now,
+          head: obj.getObjectByName('head'),
           spin: obj.getObjectByName('spin'),
-          blink: obj.getObjectByName('blink'),
-          bob: obj.getObjectByName('bob'),
-          pod: obj.getObjectByName('pod'),
-          tree: obj.getObjectByName('tree'),
+          pulse: obj.getObjectByName('pulse'),
           phase: hash01(st.id + 11) * 10,
-          growth: st.growth,
+          fireAt: 0,
+          yaw: 0,
         };
         this.structs.set(st.id, entry);
       }
       const age = now - entry.born;
-      const pop = age < 0.7 ? Math.max(0.01, easeOutBack(age / 0.7)) : 1;
-      if (st.type === 'seed') {
-        entry.growth += (st.growth - entry.growth) * 0.08;
-        const g = entry.growth;
-        entry.pod.visible = g < 0.2;
-        entry.tree.visible = g >= 0.12;
-        entry.tree.scale.setScalar(0.25 + g * 1.05);
-        entry.pod.scale.setScalar(1 + Math.sin(now * 3 + entry.phase) * 0.12);
-        const wilt = st.hp < 100 ? 1 - (100 - st.hp) / 250 : 1;
-        entry.obj.scale.setScalar(pop * wilt);
-      } else {
-        entry.obj.scale.setScalar(pop);
-      }
-      if (entry.spin) entry.spin.rotation.y += 0.04 * world.power;
-      if (entry.blink) entry.blink.visible = Math.sin(now * 3 + entry.phase) > -0.2;
-      if (entry.bob) entry.bob.position.y = 1.35 + Math.sin(now * 2 + entry.phase) * 0.35;
+      entry.obj.scale.setScalar(age < 0.7 ? Math.max(0.01, easeOutBack(age / 0.7)) : 1);
+      if (entry.spin) entry.spin.rotation.y += 0.04;
+      if (entry.pulse) entry.pulse.scale.setScalar(1.4 + ((now * 0.8 + entry.phase) % 1) * 1.6);
+      if (st.type === 'turret') this.animateTurret(entry, now);
     }
   }
 
-  syncOres(world, now) {
-    for (const [id, entry] of this.ores) {
-      if (!world.ores.has(id)) {
+  /** Turrets swivel toward the nearest alien and fire tracer bolts (the host applies the damage). */
+  animateTurret(entry, now) {
+    let best = null;
+    let bestD = TUNING.turretRange;
+    for (const e of this.enemies.values()) {
+      const d = e.obj.position.distanceTo(entry.obj.position);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    if (!best) return;
+    const local = entry.obj.worldToLocal(best.obj.position.clone());
+    const target = Math.atan2(local.x, local.z);
+    entry.yaw += Math.atan2(Math.sin(target - entry.yaw), Math.cos(target - entry.yaw)) * 0.25;
+    entry.head.rotation.y = entry.yaw;
+    if (now >= entry.fireAt) {
+      entry.fireAt = now + TUNING.turretRate;
+      const muzzle = entry.head.localToWorld(new THREE.Vector3(0, 0, 1.4));
+      const hit = best.obj.position.clone().addScaledVector(best.up, best.kind === 1 ? 1.8 : 0.8);
+      this.fx.beam(muzzle, hit, 0xff7a4a);
+    }
+  }
+
+  syncCells(world, now) {
+    for (const [id, entry] of this.cells) {
+      if (!world.cells.has(id)) {
         this.entities.remove(entry.obj);
-        this.ores.delete(id);
+        this.cells.delete(id);
       }
     }
-    for (const ore of world.ores.values()) {
-      let entry = this.ores.get(ore.id);
+    for (const cell of world.cells.values()) {
+      let entry = this.cells.get(cell.id);
       if (!entry) {
-        const obj = buildOre();
-        orient(obj, ore.dir, world.terrain.surfaceRadius(ore.dir));
+        const obj = buildCell();
+        orient(obj, cell.dir, world.terrain.surfaceRadius(cell.dir), hash01(cell.id) * 6);
         this.entities.add(obj);
-        entry = { obj, base: obj.position.clone(), phase: hash01(ore.id) * 6 };
-        this.ores.set(ore.id, entry);
+        entry = { obj, base: obj.position.clone(), phase: hash01(cell.id) * 6 };
+        this.cells.set(cell.id, entry);
       }
-      const bob = 0.25 + Math.sin(now * 2 + entry.phase) * 0.18;
       tmpV.copy(entry.base).normalize();
-      entry.obj.position.copy(entry.base).addScaledVector(tmpV, bob);
-      entry.obj.rotateY(0.02);
+      entry.obj.position.copy(entry.base).addScaledVector(tmpV, 0.15 + Math.sin(now * 2 + entry.phase) * 0.12);
     }
   }
 
-  syncMeteors(world) {
+  syncPods(world) {
     const t = world.simTime;
-    for (const [id, entry] of this.meteors) {
-      if (!world.meteors.has(id)) {
+    for (const [id, entry] of this.pods) {
+      if (!world.pods.has(id)) {
         this.entities.remove(entry.obj, entry.warn);
-        this.meteors.delete(id);
+        this.pods.delete(id);
       }
     }
-    for (const m of world.meteors.values()) {
-      let entry = this.meteors.get(m.id);
+    for (const p of world.pods.values()) {
+      let entry = this.pods.get(p.id);
       if (!entry) {
-        const obj = buildMeteor();
+        const obj = buildPod();
         const warn = buildWarning();
-        orient(warn, m.dir, world.terrain.surfaceRadius(m.dir));
+        orient(warn, p.dir, world.terrain.surfaceRadius(p.dir));
         this.entities.add(obj, warn);
-        entry = { obj, warn, rock: obj.getObjectByName('rock'), trail: obj.getObjectByName('trail') };
-        this.meteors.set(m.id, entry);
+        entry = { obj, warn, shell: obj.getObjectByName('rock'), trail: obj.getObjectByName('trail') };
+        this.pods.set(p.id, entry);
       }
-      const p = meteorPos(m, t, world.terrain);
-      entry.obj.position.set(p[0], p[1], p[2]);
-      entry.obj.visible = t >= m.t0;
-      const start = tmpV.set(m.from[0], m.from[1], m.from[2]).multiplyScalar(R + 70);
+      const pos = podPos(p, t, world.terrain);
+      entry.obj.position.set(pos[0], pos[1], pos[2]);
+      entry.obj.visible = t >= p.t0;
+      const start = tmpV.set(p.from[0], p.from[1], p.from[2]).multiplyScalar(R + 70);
       const back = start.sub(entry.obj.position).normalize();
       entry.trail.quaternion.setFromUnitVectors(UP, back);
-      entry.rock.rotation.x += 0.05;
-      entry.rock.rotation.y += 0.03;
-      const k = Math.max(0, Math.min(1, (t - m.t0) / m.dur));
+      entry.shell.quaternion.setFromUnitVectors(UP, back.negate());
+      const k = Math.max(0, Math.min(1, (t - p.t0) / p.dur));
       const pulse = 0.5 + 0.5 * Math.sin(t * (6 + k * 14));
       const [ringMat, discMat] = entry.warn.userData.mats;
       ringMat.opacity = 0.35 + pulse * 0.6;
@@ -450,86 +396,90 @@ export class GameRenderer {
     }
   }
 
-  syncCreatures(world, dt) {
-    for (const [id, entry] of this.creatures) {
-      if (!world.creatures.has(id)) {
+  syncEnemies(world, dt) {
+    for (const [id, entry] of this.enemies) {
+      if (!world.enemies.has(id)) {
         this.entities.remove(entry.obj);
-        this.creatures.delete(id);
+        this.enemies.delete(id);
       }
     }
-    const k = 1 - Math.exp(-8 * dt);
-    for (const c of world.creatures.values()) {
-      let entry = this.creatures.get(c.id);
+    const k = 1 - Math.exp(-9 * dt);
+    for (const e of world.enemies.values()) {
+      let entry = this.enemies.get(e.id);
       if (!entry) {
-        const obj = buildCrawler(c.kind);
+        const obj = buildAlien(e.kind);
+        obj.traverse((o) => {
+          if (o.isMesh) o.castShadow = true;
+        });
         this.entities.add(obj);
         entry = {
           obj,
-          dir: new THREE.Vector3(...c.dir),
+          kind: e.kind,
+          up: new THREE.Vector3(...e.dir),
           fwd: new THREE.Vector3(1, 0, 0),
           body: obj.getObjectByName('body'),
-          core: obj.getObjectByName('core'),
-          phase: hash01(c.id) * 10,
+          data: obj.userData,
+          phase: hash01(e.id) * 10,
           flash: 0,
           born: this.clock,
         };
-        this.creatures.set(c.id, entry);
-        this.fx.burst(entry.dir.clone().multiplyScalar(world.terrain.surfaceRadius(c.dir) + 0.5), 0xc04bff, 30, 5, 0.8);
+        this.enemies.set(e.id, entry);
+        const p = entry.up.clone().multiplyScalar(world.terrain.surfaceRadius(e.dir) + 0.6);
+        this.fx.burst(p, 0x6dff5a, 26, 5, 0.7);
       }
-      const target = tmpV.set(...c.dir);
-      const move = target.clone().sub(entry.dir);
-      if (move.lengthSq() > 1e-10) {
-        move.addScaledVector(entry.dir, -move.dot(entry.dir));
-        if (move.lengthSq() > 1e-10) entry.fwd.lerp(move.normalize(), 0.2);
+      const target = tmpV.set(...e.dir);
+      const move = target.clone().sub(entry.up);
+      if (move.lengthSq() > 1e-9) {
+        move.addScaledVector(entry.up, -move.dot(entry.up));
+        if (move.lengthSq() > 1e-10) entry.fwd.lerp(move.normalize(), 0.15);
+      } else if (e.attacking) {
+        // Face the reactor while attacking in place.
+        const toBase = tmpV2.set(...world.baseDir).sub(entry.up);
+        toBase.addScaledVector(entry.up, -toBase.dot(entry.up));
+        if (toBase.lengthSq() > 1e-8) entry.fwd.lerp(toBase.normalize(), 0.05);
       }
-      entry.dir.lerp(target, k).normalize();
-      entry.fwd.addScaledVector(entry.dir, -entry.fwd.dot(entry.dir)).normalize();
-      const r = world.terrain.surfaceRadius([entry.dir.x, entry.dir.y, entry.dir.z]);
-      entry.obj.position.copy(entry.dir).multiplyScalar(r);
-      const right = new THREE.Vector3().crossVectors(entry.dir, entry.fwd).normalize();
-      tmpM.makeBasis(right, entry.dir, entry.fwd);
-      entry.obj.quaternion.setFromRotationMatrix(tmpM);
-      const t = this.clock + entry.phase;
-      const pop = Math.min(1, (this.clock - entry.born) / 0.4);
-      if (c.eating) {
-        entry.body.position.y = Math.abs(Math.sin(t * 14)) * 0.18;
-        entry.body.rotation.x = Math.sin(t * 14) * 0.25;
+      entry.up.lerp(target, k).normalize();
+      entry.fwd.addScaledVector(entry.up, -entry.fwd.dot(entry.up)).normalize();
+      const r = world.terrain.surfaceRadius([entry.up.x, entry.up.y, entry.up.z]);
+      entry.obj.position.copy(entry.up).multiplyScalar(r);
+      face(entry.obj, entry.up, entry.fwd);
+
+      const t = this.clock * (e.kind === 0 ? 14 : e.kind === 1 ? 6 : 9) + entry.phase;
+      entry.body.scale.setScalar(Math.min(1, (this.clock - entry.born) / 0.4));
+      entry.data.legs.forEach((leg, i) => {
+        leg.rotation.x = Math.sin(t + i * 1.7) * (e.attacking ? 0.15 : 0.45);
+      });
+      if (e.attacking) {
+        entry.body.rotation.x = Math.sin(t * 1.5) * 0.18;
+        entry.body.position.y = Math.abs(Math.sin(t * 1.5)) * 0.1;
       } else {
-        entry.body.position.y = Math.abs(Math.sin(t * 9)) * 0.12;
         entry.body.rotation.x = 0;
+        entry.body.position.y = Math.abs(Math.sin(t)) * 0.06;
       }
-      entry.body.scale.set(pop * (1 + Math.sin(t * 9) * 0.06), pop * (1 - Math.sin(t * 9) * 0.06), pop);
+      if (entry.data.sac) entry.data.sac.scale.set(0.8, 0.8, 0.9).multiplyScalar(1 + Math.sin(t * 0.7) * 0.12);
       entry.flash = Math.max(0, entry.flash - dt * 5);
-      entry.core.material.emissiveIntensity = 0.5 + entry.flash * 8;
-      if (c.eating && Math.random() < dt * 6) {
-        this.fx.burst(entry.obj.position.clone().addScaledVector(entry.dir, 0.6), 0xb04bff, 3, 3, 0.5);
-      }
+      entry.data.skin.emissiveIntensity = 0.4 + entry.flash * 8;
     }
   }
 
-  flashCreature(id) {
-    const entry = this.creatures.get(id);
+  flashEnemy(id) {
+    const entry = this.enemies.get(id);
     if (entry) entry.flash = 1;
   }
 
-  creatureDeath(pos, brute) {
-    const p = new THREE.Vector3(...pos);
-    this.fx.burst(p, 0xd24bff, brute ? 140 : 70, brute ? 11 : 8, 1);
-    this.fx.burst(p, 0x7dff3a, 20, 4, 0.8);
-    this.fx.shockwave(p, 0xd24bff, brute ? 5 : 3, 0.5);
-    this.shakeFrom(p, brute ? 0.5 : 0.2);
-  }
-
-  /** Remote players are smoothed toward their latest pose; the local player is exact. */
+  /** Players are smoothed toward their latest pose; downed players are hidden. */
   syncAvatars(players, world, dt) {
     const seen = new Set();
     for (const p of players) {
-      if (!p.pose) continue;
+      if (!p.pose || p.dead) continue;
       seen.add(p.id);
       let a = this.avatars.get(p.id);
       if (!a || a.color !== p.color || a.name !== p.name) {
         if (a) this.entities.remove(a.obj);
         const obj = buildAvatar(p.color, p.name);
+        obj.traverse((o) => {
+          if (o.isMesh) o.castShadow = true;
+        });
         this.entities.add(obj);
         a = {
           obj,
@@ -546,18 +496,17 @@ export class GameRenderer {
       }
       a.label.visible = !p.isLocal;
       const k = p.isLocal ? 1 : 1 - Math.exp(-14 * dt);
-      a.dir.lerp(tmpV.set(...p.pose.d), k).normalize();
+      const teleport = a.dir.distanceTo(tmpV.set(...p.pose.d)) > 0.2;
+      a.dir.lerp(tmpV.set(...p.pose.d), teleport ? 1 : k).normalize();
       a.fwd.lerp(tmpV.set(...p.pose.f), k);
       a.fwd.addScaledVector(a.dir, -a.fwd.dot(a.dir)).normalize();
       a.alt += (p.pose.h - a.alt) * k;
       const surface = world.terrain.surfaceRadius([a.dir.x, a.dir.y, a.dir.z]);
       a.obj.position.copy(a.dir).multiplyScalar(surface + a.alt);
-      const right = tmpV.crossVectors(a.dir, a.fwd).normalize();
-      tmpM.makeBasis(right, a.dir, a.fwd);
-      a.obj.quaternion.setFromRotationMatrix(tmpM);
+      face(a.obj, a.dir, a.fwd);
       if (p.pose.a === 3) {
         const down = a.dir.clone().multiplyScalar(-7);
-        const nozzle = a.obj.position.clone().addScaledVector(a.dir, 0.7).addScaledVector(a.fwd, -0.45);
+        const nozzle = a.obj.position.clone().addScaledVector(a.dir, 0.9).addScaledVector(a.fwd, -0.5);
         this.fx.emit(nozzle, down, 0xff9a3a, 2, 0.35, 1.5);
         this.fx.emit(nozzle, down, 0x7cf7d4, 1, 0.25, 1);
       }
@@ -591,10 +540,7 @@ export class GameRenderer {
   }
 
   updateEnvironment(world, dt, focus) {
-    const s = world.stats;
-    const sun = sunDir(world.simTime);
-    const sunV = new THREE.Vector3(...sun);
-    const air = s.air / 100;
+    const sunV = new THREE.Vector3(...sunDir(world.simTime));
     this.setMode(focus ? 'surface' : 'orbit');
 
     // The sun's shadow camera follows the player so shadows stay crisp on a big planet.
@@ -604,73 +550,87 @@ export class GameRenderer {
     this.fill.position.copy(sunV).multiplyScalar(-60);
     this.sunSprite.position.copy(this.camera.position).addScaledVector(sunV, 700);
     this.atmoUniforms.uSun.value.copy(sunV);
-    this.atmoUniforms.uColor.value.copy(PALETTE.atmoToxic).lerp(PALETTE.atmoClean, air);
-    this.atmoUniforms.uStrength.value = 0.8 + air * 0.6;
-
-    const waterR = world.waterR;
-    this.ocean.visible = s.water > 0.5;
-    this.ocean.scale.setScalar(waterR);
-    this.ocean.material.color.copy(PALETTE.oceanToxic).lerp(PALETTE.oceanClean, air);
-    const cloudR = focus ? CLOUD_PLAY_R : CLOUD_ORBIT_R;
-    this.clouds.scale.setScalar(cloudR);
-    const camGap = Math.abs(this.camera.position.length() - cloudR);
-    const fade = focus ? Math.max(0.15, Math.min(1, camGap / 4)) : 1;
-    this.clouds.material.opacity = Math.max(0, Math.min(0.75, (s.water - 18) / 55)) * fade * (focus ? 0.55 : 1);
-    this.clouds.rotation.y += dt * 0.006;
-    this.clouds.rotation.x += dt * 0.002;
-    this.moon.rotation.y += dt * 0.05;
-    setGridPower(world.power);
+    this.moons.forEach((m, i) => {
+      const a = world.simTime * m.speed + i * 2.4;
+      m.mesh.position.set(Math.cos(a) * m.dist, Math.sin(a * 0.7 + m.tilt) * m.dist * 0.4, Math.sin(a) * m.dist);
+      m.mesh.rotation.y += dt * 0.05;
+    });
 
     if (focus) {
-      this.sky.update(this.camera, focus, sunV, air);
+      this.sky.update(this.camera, focus, sunV, 0);
       const day = this.sky.daylight;
+      this.night = 1 - day;
       this.fog.color.copy(this.sky.horizon).lerp(this.sky.zenith, 0.12);
-      this.fog.density = 0.006 + (1 - air) * 0.011 + (1 - day) * 0.003;
+      this.fog.density = 0.013 + (1 - day) * 0.004;
       this.hemi.position.copy(focus);
-      this.hemi.color.copy(this.sky.zenith).lerp(this.sky.horizon, 0.4);
-      this.hemi.groundColor.setRGB(0.22, 0.17, 0.12);
-      this.hemi.intensity = 0.3 + day * 0.65;
-      this.ambient.intensity = 0.12 + (1 - day) * 0.15;
+      this.hemi.color.copy(this.sky.zenith).lerp(this.sky.horizon, 0.5);
+      this.hemi.groundColor.setRGB(0.25, 0.12, 0.08);
+      this.hemi.intensity = 0.35 + day * 0.6;
+      this.ambient.intensity = 0.14 + (1 - day) * 0.16;
       this.sun.intensity = 2.3 * Math.max(0.05, day);
       this.sun.color.copy(this.sky.uniforms.uSunTint.value);
       this.fill.intensity = 0.12;
-      this.headlamp.intensity = (1 - day) * 4;
+      this.headlamp.intensity = (1 - day) * 5;
       this.stars.material.opacity = Math.max(0, 1 - day * 1.3);
       this.sunSprite.material.opacity = day > 0.01 ? 1 : 0.3;
     } else {
+      this.night = 0;
       this.scene.background.setRGB(0.008, 0.012, 0.035);
       this.hemi.intensity = 0;
       this.ambient.intensity = 0.55;
       this.sun.intensity = 2.4;
-      this.sun.color.set(0xfff0d8);
+      this.sun.color.set(0xffe2c4);
       this.fill.intensity = 0.35;
       this.headlamp.intensity = 0;
       this.stars.material.opacity = 1;
       this.sunSprite.material.opacity = 1;
     }
+    this.ruinsView.update(this.clock, this.night);
 
-    this.colorTimer -= dt;
-    if (this.colorTimer <= 0) {
-      this.colorTimer = 1.2;
-      this.paintTerrain(world);
+    if (this.reactor) {
+      const hp = world.reactor.hp / world.reactor.max;
+      const hurt = world.simTime - world.reactorHitAt < 0.4;
+      this.reactor.core.rotation.y += dt * 0.6;
+      this.reactor.core.material.emissiveIntensity = (hurt ? 6 : 2.2 + Math.sin(this.clock * 2) * 0.6) * (0.3 + hp * 0.7);
+      this.reactor.rings[0].rotation.x = Math.PI / 2 + Math.sin(this.clock) * 0.2;
+      this.reactor.rings[0].rotation.z += dt * 0.8;
+      this.reactor.rings[1].rotation.x = Math.PI / 2 - Math.sin(this.clock * 1.3) * 0.2;
+      this.reactor.rings[1].rotation.z -= dt * 1.1;
+      this.reactor.beacon.visible = Math.sin(this.clock * (hp < 0.35 ? 12 : 3)) > 0;
     }
   }
 
-  /** Event-driven effects from the host. */
-  impact(dir) {
+  // ---- Event effects ----------------------------------------------------------
+
+  podLanded(dir) {
     const p = new THREE.Vector3(...dir).multiplyScalar(this.surfaceAt(dir) + 1);
-    this.fx.burst(p, 0xff7a2a, 160, 16, 1.6);
-    this.fx.burst(p, 0xffe0a0, 60, 8, 0.9);
-    this.fx.shockwave(p, 0xff9a4a, TUNING.blastRadius * 1.8, 0.9);
+    this.fx.burst(p, 0x6dff5a, 140, 14, 1.4);
+    this.fx.burst(p, 0xffb070, 80, 9, 1);
+    this.fx.shockwave(p, 0x6dff5a, TUNING.blastRadius * 2, 0.9);
     this.shakeFrom(p, 1.2);
   }
 
-  meteorDestroyed(pos) {
+  podDestroyed(pos) {
     const p = new THREE.Vector3(...pos);
-    this.fx.burst(p, 0xffb14a, 110, 12, 1.2);
-    this.fx.burst(p, 0x8ff7ff, 40, 6, 0.8);
-    this.fx.shockwave(p, 0xffc070, 5, 0.6);
+    this.fx.burst(p, 0x6dff5a, 110, 12, 1.2);
+    this.fx.burst(p, 0xffffff, 30, 6, 0.6);
+    this.fx.shockwave(p, 0x6dff5a, 5, 0.6);
     this.shakeFrom(p, 0.4);
+  }
+
+  alienDeath(pos, kind) {
+    const p = new THREE.Vector3(...pos);
+    const big = kind === 1;
+    this.fx.burst(p, 0x7dff3a, big ? 150 : 60, big ? 11 : 8, 1);
+    this.fx.shockwave(p, 0x6dff5a, big ? 5 : 2.5, 0.5);
+    this.shakeFrom(p, big ? 0.5 : 0.15);
+  }
+
+  acid(fromDir, toDir) {
+    const a = new THREE.Vector3(...fromDir).multiplyScalar(this.surfaceAt(fromDir) + 2.6);
+    const b = new THREE.Vector3(...toDir).multiplyScalar(this.surfaceAt(toDir) + 1.2);
+    this.fx.beam(a, b, 0x9dff3a);
+    this.fx.burst(b, 0x9dff3a, 24, 4, 0.7);
   }
 
   sparkle(dir, color, lift = 1) {
@@ -688,10 +648,10 @@ export class GameRenderer {
     this.clock += dt;
     this.world = world;
     this.setWorld(world);
+    this.syncEnemies(world, dt);
     this.syncStructures(world, this.clock);
-    this.syncOres(world, this.clock);
-    this.syncMeteors(world);
-    this.syncCreatures(world, dt);
+    this.syncCells(world, this.clock);
+    this.syncPods(world);
     this.syncAvatars(players, world, dt);
     this.updateEnvironment(world, dt, focus);
     if (headlampPos) this.headlamp.position.copy(headlampPos);

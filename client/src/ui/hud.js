@@ -1,4 +1,4 @@
-import { STRUCTURES, STRUCT_TYPES, TUNING, heatToCelsius } from '../sim/defs.js';
+import { STRUCTURES, STRUCT_TYPES, TUNING } from '../sim/defs.js';
 import { PLANET_RADIUS as R } from '../sim/terrain.js';
 
 const $ = (id) => document.getElementById(id);
@@ -6,11 +6,10 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 /** Line icons for the build hotbar (24×24, stroked with the structure colour). */
 const ICONS = {
-  pylon: '<path d="M4 9l9-5 7 4-9 5z"/><path d="M8.5 6.5l7 4M11 13v8M7 21h8"/>',
-  scrubber: '<circle cx="12" cy="12" r="8.5"/><path d="M12 12c0-3 1.5-5 4-5M12 12c2.6 1.5 3.3 3.9 2 6.1M12 12c-2.6 1.5-5 .9-6.2-1.3"/><circle cx="12" cy="12" r="1.3"/>',
-  condenser: '<path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/><path d="M9 14.5a3 3 0 0 0 3 3"/>',
-  heater: '<path d="M12 3c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2.3 1.2-3.6 2.4-4.6.3 1.6 1.2 2.4 2.1 2.6C11 8.5 11 6 12 3z"/>',
-  seed: '<path d="M12 21v-8"/><path d="M12 13c0-4 3-7 8-7 0 5-3.2 7-8 7zM12 15c0-3-2.4-5.5-7-5.5 0 4 2.7 5.5 7 5.5z"/>',
+  turret: '<path d="M5 20h14M8 20v-4h8v4M12 16v-4"/><rect x="7" y="7" width="10" height="5" rx="1"/><path d="M17 9h5"/>',
+  generator: '<rect x="4" y="8" width="16" height="11" rx="1.5"/><path d="M13 3l-3 6h4l-3 6"/>',
+  medbay: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/>',
+  barricade: '<path d="M3 18h18M5 18V9h14v9"/><path d="M5 9l4 4M9 9l4 4M13 9l4 4"/>',
 };
 
 export function formatTime(seconds) {
@@ -31,53 +30,37 @@ export function toast(text, kind = '', ms = 3800) {
   }, ms);
 }
 
-export function renderPlayerList(el, members, hostId, meId) {
+export function renderPlayerList(el, members, hostId, meId, world) {
   el.innerHTML = members
-    .map(
-      (m) =>
-        `<li><span class="dot" style="color:${esc(m.color)}"></span>${esc(m.name)}${m.id === meId ? ' <small>(you)</small>' : ''}${
-          m.id === hostId ? '<span class="tag">host</span>' : ''
-        }</li>`,
-    )
+    .map((m) => {
+      const p = world?.players.get(m.id);
+      const hp = p ? Math.max(0, p.hp) : TUNING.playerHp;
+      return `<li class="${p?.dead ? 'down' : ''}"><span class="dot" style="color:${esc(m.color)}"></span>${esc(m.name)}${
+        m.id === meId ? ' <small>(you)</small>' : ''
+      }${m.id === hostId ? '<span class="tag">host</span>' : ''}${
+        world ? `<span class="mini"><i style="width:${hp}%"></i></span>` : ''
+      }</li>`;
+    })
     .join('');
 }
 
-/** Picks the single most useful next step for the team, like a mission computer. */
-function objective(world) {
-  const s = world.stats;
-  const count = {};
-  for (const st of world.structures.values()) count[st.type] = (count[st.type] || 0) + 1;
-  if (world.power < 0.95) return '⚠ Brownout! Build Solar Pylons [1] or salvage a machine [X].';
-  const eating = [...world.creatures.values()].some((c) => c.eating);
-  if (eating) return '👾 Crawlers are eating your base! Follow the purple dots on the radar and shoot them.';
-  if ((count.pylon || 0) < 2) return 'Mine cyan crystals for energy, then build Solar Pylons [1].';
-  if (s.heat > 74) return '🔥 The planet is overheating. Salvage a Thermal Core [X].';
-  if (s.heat < 33) return '❄ The planet is frozen. Build Thermal Cores [4] to warm it.';
-  if (s.air < 30) return 'The air is toxic. Build Air Scrubbers [2].';
-  if (s.water < 25) return 'Oceans are dry. Build Vapor Condensers [3].';
-  if ((count.seed || 0) < 10) return 'Conditions are right: plant Seed Pods [5] on high ground.';
-  if (s.heat < 45) return 'Still chilly. One more Thermal Core [4] will help the forests.';
-  if (s.bio >= TUNING.winBio) return '✦ Biosphere stable. Hold it there!';
-  return 'Grow the forest and protect it from meteors. Reach 90% biosphere.';
-}
-
-export function missionText(m) {
-  if (m.kind === 'kill') return `Destroy ${m.n} meteors or crawlers`;
-  if (m.kind === 'ore') return `Mine ${m.n} crystals`;
-  if (m.type === 'pylon') return `Build ${m.n} Solar Pylons`;
-  if (m.type === 'seed') return `Plant ${m.n} Seed Pods`;
-  return `Build ${m.n} structures`;
+/** A single urgent instruction, shown under the compass only when something needs attention. */
+function alert(world, me) {
+  if (me?.dead) return '';
+  const r = world.reactor.hp / world.reactor.max;
+  if (world.simTime - world.reactorHitAt < 1.5) return r < 0.35 ? '⚠ REACTOR CRITICAL! Get back to the base!' : '⚠ The reactor is under attack!';
+  if (me && me.hp < 35) return '❤ Low health! Stand near a Med Station or back off to recover.';
+  if (world.pods.size) return '☄ Drop pods incoming. Shoot them before they land in the red rings!';
+  if (!world.waveActive && world.wave === 0) {
+    if (!world.structures.size) return 'Grab the glowing power cells, then press 1 to build an Auto Turret near the reactor.';
+    return 'The first wave is coming. Build more defences around the reactor.';
+  }
+  if (!world.waveActive) return 'Wave cleared. Repair, collect power cells and build before the next wave.';
+  return '';
 }
 
 export class Hud {
   constructor() {
-    this.statEls = {};
-    for (const el of document.querySelectorAll('.stat')) {
-      this.statEls[el.dataset.stat] = { bar: el.querySelector('i'), val: el.querySelector('.val') };
-    }
-    this.history = [];
-    this.lastEnergy = null;
-    this.energyRate = 0;
     this.buildHotbar();
   }
 
@@ -101,72 +84,39 @@ export class Hud {
     }
   }
 
-  update(world, dt) {
-    const s = world.stats;
-    const now = world.simTime;
-    this.history.push({ t: now, ...s });
-    while (this.history.length > 2 && now - this.history[0].t > 4) this.history.shift();
-    const old = this.history[0];
-    const span = Math.max(0.5, now - old.t);
-    const trend = (key) => {
-      const d = (s[key] - old[key]) / span;
-      if (d > 0.05) return ' <span class="trend-up">▲</span>';
-      if (d < -0.05) return ' <span class="trend-down">▼</span>';
-      return '';
-    };
+  update(world, meId) {
+    const me = world.players.get(meId);
+    const hp = me ? Math.max(0, Math.round(me.hp)) : TUNING.playerHp;
+    $('hp-value').textContent = me?.dead ? 'DOWN' : String(hp);
+    $('hp-bar').style.width = `${hp}%`;
+    $('hp-bar').style.backgroundPosition = `${-(1 - hp / 100) * 160}px 0`;
+    $('hp-bar').classList.toggle('low', hp < 30);
 
-    for (const key of ['air', 'water', 'life']) {
-      this.statEls[key].bar.style.width = `${s[key]}%`;
-      this.statEls[key].val.innerHTML = `${Math.round(s[key])}%${trend(key)}`;
+    const r = Math.max(0, world.reactor.hp / world.reactor.max);
+    $('reactor-value').textContent = `${Math.round(r * 100)}%`;
+    $('reactor-bar').style.width = `${r * 100}%`;
+    $('reactor-bar').classList.toggle('low', r < 0.3);
+
+    $('energy-value').textContent = Math.floor(world.energy);
+    $('wave-value').textContent = `${world.wave} / ${TUNING.waves}`;
+    if (world.waveActive) {
+      const left = world.enemies.size + world.pods.size + world.queue.length;
+      $('wave-label').textContent = 'Aliens left';
+      $('wave-status').textContent = String(left);
+      $('wave-status').style.color = 'var(--danger)';
+    } else {
+      $('wave-label').textContent = world.phase === 'play' ? 'Next wave in' : 'Status';
+      $('wave-status').textContent = world.phase === 'play' ? formatTime(world.nextWaveAt - world.simTime) : '—';
+      $('wave-status').style.color = '';
     }
-    this.statEls.heat.bar.style.width = `${s.heat}%`;
-    this.statEls.heat.val.innerHTML = `${heatToCelsius(s.heat)}°C${trend('heat')}`;
 
-    const bio = Math.round(s.bio);
-    $('bio-value').textContent = `${bio}%`;
-    const fill = $('bio-fill');
-    fill.style.strokeDashoffset = String(326.7 * (1 - s.bio / 100));
-    fill.style.stroke = s.bio >= TUNING.winBio ? '#ffffff' : s.bio > 60 ? 'var(--accent)' : s.bio > 30 ? 'var(--warn)' : 'var(--danger)';
-    $('hold-fill').style.strokeDashoffset = String(270.2 * (1 - Math.min(1, world.hold / TUNING.winHold)));
-
-    if (this.lastEnergy !== null && dt > 0) {
-      const inst = (s.energy - this.lastEnergy) / dt;
-      if (Math.abs(inst) < 5) this.energyRate += (inst - this.energyRate) * Math.min(1, dt * 1.5);
-    }
-    this.lastEnergy = s.energy;
-    $('energy-value').textContent = Math.floor(s.energy);
-    const rate = this.energyRate;
-    const rateEl = $('energy-rate');
-    rateEl.textContent = `${rate >= 0 ? '+' : ''}${rate.toFixed(1)}/s`;
-    rateEl.className = rate >= 0 ? 'trend-up' : 'trend-down';
-    $('brownout').classList.toggle('hidden', world.power >= 0.95 || world.phase !== 'play');
-
-    const elapsed = (world.phase === 'play' ? now : world.wonAt) - world.playStart;
-    const left = TUNING.timeLimit - elapsed;
-    $('time-value').textContent = formatTime(left);
-    $('time-value').style.color = left < 120 ? 'var(--danger)' : left < 300 ? 'var(--warn)' : '';
-
-    const m = world.mission;
-    $('mission').classList.toggle('hidden', !m || world.phase !== 'play');
-    if (m) {
-      $('mission-text').textContent = missionText(m);
-      $('mission-reward').textContent = `+${m.reward}⚡`;
-      $('mission-bar').style.width = `${(m.progress / m.n) * 100}%`;
-      const secs = Math.max(0, m.expires - now);
-      $('mission-time').textContent = `${m.progress}/${m.n} · ${Math.ceil(secs)}s left`;
-      $('mission').classList.toggle('urgent', secs < 15);
-    }
-    const incoming = world.meteors.size;
-    $('shower-value').textContent = incoming ? `☄ ${incoming} incoming` : formatTime(world.nextShowerAt - now);
-    $('shower-value').style.color = incoming ? 'var(--danger)' : '';
-
-    for (const slot of this.slots) slot.classList.toggle('poor', s.energy < STRUCTURES[slot.dataset.type].cost);
-    $('objective').textContent = world.phase === 'play' ? objective(world) : '';
+    for (const slot of this.slots) slot.classList.toggle('poor', world.energy < STRUCTURES[slot.dataset.type].cost);
+    $('objective').textContent = world.phase === 'play' ? alert(world, me) : '';
   }
 
   /**
    * Heading strip across the top: cardinal directions relative to the planet's north pole,
-   * with markers for meteors, crawlers and the nearest crystals, labelled in metres.
+   * with markers for the reactor, aliens, drop pods and the nearest power cells.
    */
   drawCompass(world, player) {
     const canvas = $('compass');
@@ -175,7 +125,6 @@ export class Hud {
     const H = canvas.height;
     const span = Math.PI * 0.9;
     const up = player.dir;
-    // Local north and east on the tangent plane.
     let nx = -up.y * up.x;
     let ny = 1 - up.y * up.y;
     let nz = -up.y * up.z;
@@ -215,13 +164,13 @@ export class Hud {
       const x = xOf((deg * Math.PI) / 180);
       if (x < -20 || x > W + 20) continue;
       const label = labels[deg];
-      ctx.fillStyle = label ? '#edf3fb' : 'rgba(237,243,251,0.45)';
       if (label) {
         ctx.font = `700 ${label.length === 1 ? 34 : 26}px "Chakra Petch", sans-serif`;
         ctx.fillStyle = label === 'N' ? '#ff6b6b' : '#edf3fb';
         ctx.fillText(label, x, 47);
       } else {
         const tall = deg % 15 === 0;
+        ctx.fillStyle = 'rgba(237,243,251,0.45)';
         ctx.fillRect(x - 1.5, tall ? 30 : 34, 3, tall ? 12 : 7);
         if (tall) {
           ctx.font = '600 18px "Chakra Petch", sans-serif';
@@ -244,24 +193,33 @@ export class Hud {
         ctx.lineTo(x + 10, 13);
         ctx.lineTo(x, 24);
         ctx.lineTo(x - 10, 13);
+      } else if (shape === 'home') {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + 13, 11);
+        ctx.lineTo(x + 9, 11);
+        ctx.lineTo(x + 9, 25);
+        ctx.lineTo(x - 9, 25);
+        ctx.lineTo(x - 9, 11);
+        ctx.lineTo(x - 13, 11);
       } else {
-        ctx.arc(x, 13, 10, 0, Math.PI * 2);
+        ctx.arc(x, 13, 9, 0, Math.PI * 2);
       }
       ctx.fill();
       if (label && Math.abs(x - W / 2) > 40) {
         ctx.font = '700 20px "Chakra Petch", sans-serif';
-        ctx.fillStyle = color;
         ctx.fillText(label, x, 82);
       }
     };
-    const ores = [...world.ores.values()]
-      .map((o) => ({ o, m: meters(o.dir) }))
+    const cells = [...world.cells.values()]
+      .map((c) => ({ c, m: meters(c.dir) }))
       .sort((a, b) => a.m - b.m)
       .slice(0, 3);
-    for (const { o, m } of ores) marker(o.dir, '#5ff3ff', 'diamond', `${m}m`);
-    for (const c of world.creatures.values()) marker(c.dir, c.eating ? '#ff5ae0' : '#c792ff', 'dot', `${meters(c.dir)}m`);
-    for (const m of world.meteors.values()) if (world.simTime > m.t0 - 2) marker(m.dir, '#ff4a5a', 'down', `${meters(m.dir)}m`);
-    // Heading readout.
+    for (const { c, m } of cells) marker(c.dir, '#5fc8ff', 'diamond', `${m}m`);
+    for (const e of world.enemies.values()) marker(e.dir, e.kind === 1 ? '#ff9a3a' : '#7dff5a', 'dot', `${meters(e.dir)}m`);
+    for (const p of world.pods.values()) if (world.simTime > p.t0 - 2) marker(p.dir, '#ff4a5a', 'down', `${meters(p.dir)}m`);
+    const baseM = meters(world.baseDir);
+    if (baseM > 6) marker(world.baseDir, '#ffd166', 'home', `${baseM}m`);
+
     const deg = Math.round(((heading * 180) / Math.PI + 360) % 360);
     ctx.fillStyle = '#7cf7d4';
     ctx.fillRect(W / 2 - 2, 24, 4, 46);
@@ -272,13 +230,13 @@ export class Hud {
     ctx.fillText(`${String(deg).padStart(3, '0')}°`, W / 2, 83);
   }
 
-  /** Top-down radar around the player: machines, trees, crystals, crawlers and meteor targets. */
+  /** Top-down radar around the player. */
   drawRadar(world, player) {
     const canvas = $('radar');
     const ctx = canvas.getContext('2d');
     const size = canvas.width;
     const c = size / 2;
-    const range = 40;
+    const range = 45;
     const scale = (c - 10) / range;
     const up = player.dir;
     const fwd = player.fwd;
@@ -311,15 +269,13 @@ export class Hud {
       ctx.arc(c + x * scale, c - y * scale, radius, 0, Math.PI * 2);
       ctx.fill();
     };
-    for (const st of world.structures.values()) plot(st.dir, st.type === 'seed' ? 'rgba(157,255,106,0.55)' : 'rgba(234,242,255,0.8)', st.type === 'seed' ? 3 : 5);
-    for (const o of world.ores.values()) plot(o.dir, '#5ff3ff', 4);
+    for (const r of world.ruins) if (r.kind !== 'lamp') plot(r.dir, 'rgba(160,140,130,0.35)', 4);
+    for (const st of world.structures.values()) plot(st.dir, 'rgba(234,242,255,0.85)', 5);
+    for (const cell of world.cells.values()) plot(cell.dir, '#5fc8ff', 4);
+    plot(world.baseDir, '#ffd166', 9, true);
     const t = world.simTime;
-    for (const m of world.meteors.values()) {
-      if (t < m.t0 - 2) continue;
-      const blink = Math.sin(t * 12) > 0 ? '#ff4a5a' : '#ffb14a';
-      plot(m.dir, blink, 9, true);
-    }
-    for (const cr of world.creatures.values()) plot(cr.dir, cr.eating ? '#ff5ae0' : '#c792ff', cr.kind ? 9 : 6, true);
+    for (const p of world.pods.values()) if (t > p.t0 - 2) plot(p.dir, Math.sin(t * 12) > 0 ? '#ff4a5a' : '#ffb14a', 9, true);
+    for (const e of world.enemies.values()) plot(e.dir, e.kind === 1 ? '#ff9a3a' : '#7dff5a', e.kind === 1 ? 8 : 5, true);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.moveTo(c, c - 12);

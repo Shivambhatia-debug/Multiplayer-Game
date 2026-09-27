@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Seedfall</title>
-    <meta name="description" content="Seedfall is a co-op 3D terraforming simulation. Warm a frozen, toxic planet, grow forests and defend them from meteor showers with up to six friends." />
+    <title>ARES: Last Colony</title>
+    <meta name="description" content="ARES: Last Colony is a co-op 3D alien-invasion survival game. Earth has fallen; defend the last human colony on Mars against ten waves of the Xal with up to six friends." />
     <meta name="theme-color" content="#050814" />
-    <meta property="og:title" content="Seedfall" />
-    <meta property="og:description" content="Co-op 3D terraforming. Bring a dead planet to life with your friends." />
+    <meta property="og:title" content="ARES: Last Colony" />
+    <meta property="og:description" content="Earth is gone. Hold the last colony on Mars against the Xal." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -20,18 +20,18 @@
     <!-- Title screen -->
     <section id="menu" class="screen">
       <div class="brand">
-        <p class="eyebrow"><span class="pulse"></span>Planet SF-52 · Status: uninhabitable</p>
-        <h1>Seed<span>fall</span></h1>
-        <p class="tagline">A frozen, toxic world and up to six pilots. Warm it, green it, defend it, and make it breathe before the colony ship arrives.</p>
+        <p class="eyebrow"><span class="pulse"></span>Mars · Year 2086 · Last transmission</p>
+        <h1>Ares<span>Last colony</span></h1>
+        <p class="tagline">Earth is gone. The AI called SENTINEL invited the Xal, and they burned our home world. The last humans hide in the ruins of the Ares colony on Mars. Now the Xal are here too.</p>
         <ul class="chips">
           <li>1–6 players</li>
-          <li>Real-time co-op</li>
-          <li>Living climate sim</li>
-          <li>Meteors &amp; crawlers</li>
+          <li>Co-op survival</li>
+          <li>10 alien waves</li>
+          <li>Build defences</li>
         </ul>
       </div>
       <div class="card menu-card">
-        <div class="card-head"><span>Pilot registration</span><i></i></div>
+        <div class="card-head"><span>Survivor registration</span><i></i></div>
         <label class="field">
           <span>Call sign</span>
           <input id="name-input" maxlength="16" autocomplete="off" placeholder="Nova" />
@@ -50,7 +50,7 @@
         <p id="menu-status" class="status" role="status"></p>
       </div>
       <footer class="menu-foot">
-        <span><kbd>WASD</kbd> move</span><span><kbd>Space</kbd> jump / jetpack</span><span><kbd>1–5</kbd> build</span
+        <span><kbd>WASD</kbd> move</span><span><kbd>Space</kbd> jump / jetpack</span><span><kbd>1–4</kbd> build</span
         ><span><kbd>Click</kbd> shoot</span><span><kbd>Q</kbd> ping</span><span><kbd>H</kbd> help</span>
       </footer>
     </section>
@@ -63,15 +63,12 @@
         <p class="hint" id="copy-hint">Click the code to copy an invite link</p>
         <ul id="lobby-players" class="player-list"></ul>
         <div class="lobby-brief">
-          <h3>Mission brief</h3>
+          <h3>Your mission</h3>
           <ol>
-            <li><b>Warm it.</b> Thermal Cores push the planet above freezing.</li>
-            <li><b>Power it.</b> Solar Pylons feed every machine. Night means less power.</li>
-            <li><b>Breathe &amp; drink.</b> Scrubbers clean the air, Condensers fill the oceans.</li>
-            <li><b>Seed it.</b> Trees spread on their own once conditions are right.</li>
-            <li><b>Defend it.</b> Shoot meteors and the blight crawlers that come to eat your base.</li>
+            <li><b>Protect the reactor.</b> If it is destroyed, the colony falls.</li>
+            <li><b>Build defences</b> with energy from glowing power cells and alien kills.</li>
+            <li><b>Survive 10 waves</b> of the Xal until the evacuation beacon is charged.</li>
           </ol>
-          <p>Hold the biosphere above <b>90%</b> for 12 seconds before the colony ship arrives (16:00).</p>
         </div>
         <button id="launch-btn" class="btn primary">Launch mission</button>
         <p id="lobby-status" class="status"></p>
@@ -87,42 +84,27 @@
       </div>
 
       <aside id="vitals" class="panel">
-        <div class="vitals-head">
-          <div class="bio">
-            <svg viewBox="0 0 120 120" class="bio-ring">
-              <circle cx="60" cy="60" r="52" class="track" />
-              <circle cx="60" cy="60" r="52" class="fill" id="bio-fill" />
-              <circle cx="60" cy="60" r="43" class="hold" id="hold-fill" />
-            </svg>
-            <div class="bio-text"><b id="bio-value">0%</b><span>Biosphere</span></div>
-          </div>
-          <div class="energy-block">
-            <span class="label">Shared energy</span>
-            <div class="energy"><b id="energy-value">0</b><small id="energy-rate"></small></div>
-          </div>
+        <div class="vital">
+          <div class="vital-row"><span>Pilot health</span><b id="hp-value">100</b></div>
+          <div class="bar big"><i id="hp-bar" class="hp"></i></div>
         </div>
-        <div class="stats">
-          <div class="stat" data-stat="air"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h8" /></svg>Air</span><span class="val"></span><div class="bar"><i></i></div></div>
-          <div class="stat" data-stat="water"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z" /></svg>Water</span><span class="val"></span><div class="bar"><i></i></div></div>
-          <div class="stat" data-stat="heat"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0z" /></svg>Heat</span><span class="val"></span><div class="bar heat"><i></i><em></em></div></div>
-          <div class="stat" data-stat="life"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M5 19c0-8 6-13 14-14-1 8-6 14-14 14zM5 19l7-7" /></svg>Life</span><span class="val"></span><div class="bar"><i></i></div></div>
+        <div class="vital">
+          <div class="vital-row"><span>Reactor</span><b id="reactor-value">100%</b></div>
+          <div class="bar big"><i id="reactor-bar" class="reactor"></i></div>
+        </div>
+        <div class="energy-block">
+          <span class="label">Colony energy</span>
+          <div class="energy"><b id="energy-value">0</b></div>
         </div>
         <div class="meta">
-          <div class="meta-row"><span>Colony ETA</span><b id="time-value">0:00</b></div>
-          <div class="meta-row"><span>Next shower</span><b id="shower-value">—</b></div>
+          <div class="meta-row"><span>Wave</span><b id="wave-value">0 / 10</b></div>
+          <div class="meta-row"><span id="wave-label">Next wave</span><b id="wave-status">—</b></div>
           <div class="meta-row"><span>Room</span><b id="hud-room">—</b></div>
         </div>
-        <div id="brownout" class="brownout hidden">Brownout · build pylons</div>
       </aside>
 
       <div class="hud-right">
         <ul id="hud-players" class="hud-players panel"></ul>
-        <div id="mission" class="mission panel hidden">
-          <div class="mission-head"><span>Bounty</span><b id="mission-reward"></b></div>
-          <p id="mission-text"></p>
-          <div class="bar"><i id="mission-bar"></i></div>
-          <small id="mission-time"></small>
-        </div>
       </div>
 
       <canvas id="radar" width="320" height="320" aria-label="Radar"></canvas>
@@ -130,6 +112,7 @@
       <div id="floaters"></div>
       <div id="banner"></div>
       <div id="combo"></div>
+      <div id="downed" class="hidden"><b>You are down</b><span id="downed-timer">Respawning at the reactor…</span></div>
       <div id="crosshair"><i></i><i></i><i></i><i></i></div>
       <div id="prompt"></div>
       <div id="build-info" class="panel hidden"></div>
@@ -137,6 +120,22 @@
     </section>
 
     <div id="toasts" aria-live="polite"></div>
+
+    <!-- Opening story and mission briefing -->
+    <section id="story" class="overlay story hidden">
+      <div class="story-inner">
+        <p class="eyebrow">Incoming transmission · Ares Colony</p>
+        <ol id="story-lines"></ol>
+        <div id="briefing" class="briefing hidden">
+          <div><b>🎯 Goal</b><p>Keep the <strong>reactor</strong> alive for <strong>10 waves</strong>.</p></div>
+          <div><b>🔧 Build</b><p>Collect glowing <strong>power cells</strong>, then press <kbd>1</kbd>–<kbd>4</kbd> to build turrets and defences.</p></div>
+          <div><b>🔫 Fight</b><p><strong>Click</strong> to shoot aliens and drop pods. If you fall, you respawn at the reactor.</p></div>
+        </div>
+        <div class="row">
+          <button id="story-go" class="btn primary">Skip</button>
+        </div>
+      </div>
+    </section>
 
     <!-- Help -->
     <section id="help" class="overlay hidden">
@@ -150,8 +149,8 @@
               <li><kbd>Mouse</kbd> Look (click to lock)</li>
               <li><kbd>Shift</kbd> Sprint · <kbd>Space</kbd> Jump</li>
               <li>Hold <kbd>Space</kbd> in the air: jetpack</li>
-              <li><kbd>1</kbd>–<kbd>5</kbd> Pick a structure</li>
-              <li><kbd>Click</kbd> Build / shoot meteors</li>
+              <li><kbd>1</kbd>–<kbd>4</kbd> Pick a defence to build</li>
+              <li><kbd>Click</kbd> Shoot / place the selected build</li>
               <li><kbd>Right click</kbd> Cancel build</li>
               <li><kbd>X</kbd> Salvage nearby structure</li>
               <li><kbd>Q</kbd> Ping a spot for your team</li>
@@ -159,20 +158,17 @@
             </ul>
           </div>
           <div>
-            <h3>The simulation</h3>
+            <h3>How to survive</h3>
             <ul>
-              <li><b>Energy</b> is shared. Walk into cyan crystals to mine it. Pylons produce more on the day side.</li>
-              <li><b>Heat</b> must sit between 45 and 65 (≈10–28°C). Condensers stay idle while the planet is frozen.</li>
-              <li><b>Water</b> rises as a real ocean. Low land floods, so build high.</li>
-              <li><b>Trees</b> breathe out oxygen and spread, but drown or burn when things go wrong.</li>
-              <li><b>Meteors</b> wipe out everything inside their red ring, yet they bring heat and ice.</li>
-              <li><b>Blight crawlers</b> walk to your machines and eat them, and they poison the air. Two shots kill one; big brutes take five.</li>
-              <li><b>Bounties</b> pay big energy rewards. The compass (top) and radar (bottom left) show crawlers in purple, meteors in red and crystals in cyan.</li>
-              <li>Stabilize the planet before the <b>colony ship</b> arrives, or the mission fails.</li>
+              <li><b>The reactor</b> is the heart of the colony. If it hits 0%, the game is over. It repairs slowly between waves.</li>
+              <li><b>Energy</b> is shared. Walk into glowing blue <b>power cells</b>, kill aliens and clear waves to earn it.</li>
+              <li><b>Auto Turrets</b> shoot on their own. <b>Generators</b> make energy. <b>Med Stations</b> heal you. <b>Barricades</b> hold aliens back.</li>
+              <li><b>The Xal:</b> Drones are fast, Brutes are tanks, Spitters shoot acid from range. Shoot <b>drop pods</b> before they land or they release more drones.</li>
+              <li>The <b>compass</b> and <b>radar</b> show aliens (green), pods (red), power cells (blue) and the reactor (gold).</li>
             </ul>
           </div>
         </div>
-        <button id="help-close" class="btn primary">Back to the planet</button>
+        <button id="help-close" class="btn primary">Back to the fight</button>
       </div>
     </section>
 

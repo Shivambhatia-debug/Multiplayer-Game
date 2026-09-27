@@ -1,17 +1,17 @@
-// A sky dome seen from the surface: horizon-to-zenith gradient, sun glow, sunsets,
-// and colours that follow the planet's air quality (toxic amber to clean blue).
+// A Martian sky dome seen from the surface: butterscotch dust by day, a cold blue glow
+// around the sun at sunset (as on the real Mars), and a dark starry night.
 import * as THREE from 'three';
 
 const C = (hex) => new THREE.Color(hex);
 const SKY = {
-  toxicZenith: C(0x5a3418),
-  toxicHorizon: C(0xc98b55),
+  toxicZenith: C(0x7a4a30),
+  toxicHorizon: C(0xd9a070),
   cleanZenith: C(0x2a64c2),
   cleanHorizon: C(0xa8cdee),
   nightZenith: C(0x02040b),
   nightHorizon: C(0x0a1224),
-  sunsetZenith: C(0x33305e),
-  sunsetHorizon: C(0xff8448),
+  sunsetZenith: C(0x262a44),
+  sunsetHorizon: C(0x6a6478),
   toxicGround: C(0x3a2616),
   cleanGround: C(0x40566a),
 };
@@ -97,7 +97,8 @@ export class SkyDome {
     u.uZenith.value.copy(zenith);
     u.uHorizon.value.copy(horizon);
     u.uGround.value.copy(SKY.toxicGround).lerp(SKY.cleanGround, air).lerp(horizon, 0.6).multiplyScalar(0.3 + day * 0.6);
-    u.uSunTint.value.setRGB(1, 0.85 - sunset * 0.35, 0.66 - sunset * 0.45);
+    // Martian dust scatters blue light forward, so the sun's halo turns blue at dusk.
+    u.uSunTint.value.setRGB(1 - sunset * 0.55, 0.85 - sunset * 0.1, 0.66 + sunset * 0.3);
     u.uDay.value = day;
     this.daylight = day;
     this.mesh.position.copy(camera.position);

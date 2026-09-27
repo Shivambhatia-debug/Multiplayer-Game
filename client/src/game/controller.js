@@ -1,6 +1,6 @@
 // Third-person movement on a spherical planet. Gravity always points to the core.
 import * as THREE from 'three';
-import { randomDir } from '../sim/vec.js';
+import { offsetDir } from '../sim/vec.js';
 import { PLANET_RADIUS } from '../sim/terrain.js';
 
 const WALK = 7.5;
@@ -34,16 +34,13 @@ export class LocalPlayer {
     this.surface = PLANET_RADIUS;
   }
 
+  /** Drops the pilot next to the colony reactor, facing outward toward the wasteland. */
   spawn(world) {
-    for (let i = 0; i < 40; i++) {
-      const d = randomDir(Math.random);
-      if (!world.isUnderwater(d, 0.5)) {
-        this.dir.set(...d);
-        break;
-      }
-    }
-    const helper = Math.abs(this.dir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-    this.fwd.crossVectors(helper, this.dir).normalize();
+    this.dir.set(...offsetDir(world.baseDir, Math.random, 11, 13, PLANET_RADIUS));
+    const base = new THREE.Vector3(...world.baseDir);
+    this.fwd.copy(this.dir).sub(base);
+    this.fwd.addScaledVector(this.dir, -this.fwd.dot(this.dir)).normalize();
+    this.fuel = 1;
     this.alt = 3;
     this.vAlt = 0;
     const g = this.groundRadius(world);
@@ -51,10 +48,10 @@ export class LocalPlayer {
     this.surface = g.surface;
   }
 
-  /** Radius of whatever the player stands on: terrain, or the ocean surface when swimming. */
+  /** Radius of the ground under the player. */
   groundRadius(world) {
     const surface = world.terrain.surfaceRadius([this.dir.x, this.dir.y, this.dir.z]);
-    return { surface, ground: Math.max(surface, world.waterR - 0.55) };
+    return { surface, ground: surface };
   }
 
   update(dt, input, world, allowMove) {
@@ -68,13 +65,12 @@ export class LocalPlayer {
       f = (input.down('KeyW', 'ArrowUp') ? 1 : 0) - (input.down('KeyS', 'ArrowDown') ? 1 : 0);
       s = (input.down('KeyD', 'ArrowRight') ? 1 : 0) - (input.down('KeyA', 'ArrowLeft') ? 1 : 0);
     }
-    const { surface, ground } = this.groundRadius(world);
-    const swimming = ground > surface + 0.05;
+    const { ground } = this.groundRadius(world);
     this.moving = f !== 0 || s !== 0;
     this.sprinting = this.moving && input.down('ShiftLeft', 'ShiftRight');
     if (this.moving) {
       right.crossVectors(this.fwd, this.dir).normalize();
-      const speed = (input.down('ShiftLeft', 'ShiftRight') ? SPRINT : WALK) * (swimming ? 0.6 : 1);
+      const speed = (input.down('ShiftLeft', 'ShiftRight') ? SPRINT : WALK);
       tmp.copy(this.fwd).multiplyScalar(f).addScaledVector(right, s).normalize().multiplyScalar(speed * dt);
       const radius = ground + this.alt;
       this.dir.multiplyScalar(radius).add(tmp).normalize();
@@ -85,7 +81,7 @@ export class LocalPlayer {
     const space = allowMove && input.down('Space');
     this.jetting = false;
     if (space && this.grounded) {
-      this.vAlt = swimming ? JUMP * 0.7 : JUMP;
+      this.vAlt = JUMP;
       this.grounded = false;
     } else if (space && !this.grounded && this.fuel > 0 && this.vAlt < 3) {
       this.jetting = true;
@@ -96,6 +92,7 @@ export class LocalPlayer {
     this.vAlt -= GRAVITY * dt;
     if (this.alt > MAX_ALT) this.vAlt = Math.min(this.vAlt, 0);
     this.alt += this.vAlt * dt;
+    this.collide(world);
     // Terrain under the new position may be higher or lower; keep the player on top of it.
     const next = this.groundRadius(world);
     const absolute = ground + this.alt;
@@ -109,6 +106,34 @@ export class LocalPlayer {
     }
     this.ground = next.ground;
     this.surface = next.surface;
+  }
+
+  /** True when a camera at unit direction `probe`, `height` above ground, would sit inside a building. */
+  insideBuilding(world, probe, height) {
+    if (height > 7) return false;
+    for (const c of world.colliders) {
+      const dx = probe[0] - c.dir[0];
+      const dy = probe[1] - c.dir[1];
+      const dz = probe[2] - c.dir[2];
+      if (Math.hypot(dx, dy, dz) * PLANET_RADIUS < c.r + 0.3) return true;
+    }
+    return false;
+  }
+
+  /** Pushes the pilot out of ruins and the reactor so buildings feel solid. */
+  collide(world) {
+    if (this.alt > 5) return;
+    for (const c of world.colliders) {
+      tmp.set(c.dir[0], c.dir[1], c.dir[2]);
+      const d = this.dir.distanceTo(tmp) * PLANET_RADIUS;
+      const min = c.r + 0.45;
+      if (d >= min || d < 1e-6) continue;
+      // Move along the tangent plane directly away from the collider centre.
+      right.copy(this.dir).sub(tmp);
+      right.addScaledVector(this.dir, -right.dot(this.dir)).normalize();
+      this.dir.addScaledVector(right, (min - d) / PLANET_RADIUS).normalize();
+    }
+    this.fwd.addScaledVector(this.dir, -this.fwd.dot(this.dir)).normalize();
   }
 
   /** World-space feet position. */
@@ -138,7 +163,8 @@ export class LocalPlayer {
       probe[0] = this.camPos.x / r;
       probe[1] = this.camPos.y / r;
       probe[2] = this.camPos.z / r;
-      if (r > world.terrain.surfaceRadius(probe) + 0.6) break;
+      const ground = world.terrain.surfaceRadius(probe);
+      if (r > ground + 0.6 && !this.insideBuilding(world, probe, r - ground)) break;
     }
     camera.position.copy(this.camPos);
     camera.up.copy(this.dir);

@@ -1,25 +1,29 @@
-// The planet simulation. The host runs `step()` and `handleAction()`; every other
-// client mirrors the host through `applyWorld()` / `applyTick()`. If the host leaves,
-// the next player simply starts stepping its mirrored copy (host migration).
+// The colony simulation. The host runs `step()` and `handleAction()`; every other client
+// mirrors the host through `applyWorld()` / `applyTick()`. If the host leaves, the next
+// player starts stepping its mirrored copy (host migration).
 import { mulberry32 } from './noise.js';
-import { createTerrain, waterRadius, PLANET_RADIUS as R } from './terrain.js';
-import { STRUCTURES, STRUCT_TYPES, TUNING, sunDir, biosphere } from './defs.js';
-import { norm, dot, dist, clamp, round, roundVec, randomDir, offsetDir } from './vec.js';
+import { createTerrain, BASE_DIR, PLANET_RADIUS as R } from './terrain.js';
+import { STRUCTURES, STRUCT_TYPES, ENEMIES, TUNING } from './defs.js';
+import { norm, dist, clamp, round, roundVec, randomDir, offsetDir } from './vec.js';
+import { createRuins, ruinColliders } from './ruins.js';
 
-const METEOR_ALTITUDE = 70;
+const POD_ALTITUDE = 70;
 
 export function newSeed() {
   return (Math.random() * 0x7fffffff) | 0;
 }
 
-/** Position of a meteor at simulation time `t`, as [x, y, z]. */
-export function meteorPos(m, t, terrain) {
-  const k = clamp((t - m.t0) / m.dur, 0, 1);
+/** Position of a falling drop pod at simulation time `t`, as [x, y, z]. */
+export function podPos(p, t, terrain) {
+  const k = clamp((t - p.t0) / p.dur, 0, 1);
   const e = k * k;
-  const start = m.from.map((v) => v * (R + METEOR_ALTITUDE));
-  const end = m.dir.map((v) => v * terrain.surfaceRadius(m.dir));
+  const start = p.from.map((v) => v * (R + POD_ALTITUDE));
+  const end = p.dir.map((v) => v * terrain.surfaceRadius(p.dir));
   return [start[0] + (end[0] - start[0]) * e, start[1] + (end[1] - start[1]) * e, start[2] + (end[2] - start[2]) * e];
 }
+
+/** Metres along the surface between two unit directions (chord approximation). */
+const metres = (a, b) => dist(a, b) * R;
 
 export class World {
   constructor(seed = newSeed()) {
@@ -29,426 +33,427 @@ export class World {
   reset(seed, phase = 'lobby') {
     this.seed = seed;
     this.terrain = createTerrain(seed);
+    this.baseDir = BASE_DIR;
+    this.ruins = createRuins(seed, BASE_DIR);
+    this.colliders = [{ dir: BASE_DIR, r: 3 }, ...ruinColliders(this.ruins)];
     this.rand = mulberry32(seed ^ 0x5eed5);
     this.phase = phase;
     this.simTime = 0;
     this.playStart = 0;
-    this.wonAt = 0;
-    this.stats = { air: 4, water: 0, heat: 10, life: 0, energy: TUNING.startEnergy, bio: 0 };
-    this.power = 1;
-    this.hold = 0;
+    this.endedAt = 0;
+    this.energy = TUNING.startEnergy;
+    this.reactor = { hp: TUNING.reactorHp, max: TUNING.reactorHp };
+    this.reactorHitAt = -99;
     this.structures = new Map();
-    this.ores = new Map();
-    this.meteors = new Map();
+    this.cells = new Map();
+    this.enemies = new Map();
+    this.pods = new Map();
+    this.players = new Map();
+    this.wave = 0;
+    this.waveActive = false;
+    this.nextWaveAt = TUNING.firstWave;
+    this.queue = [];
+    this.spawnTimer = 0;
+    this.gates = [];
+    this.cellTimer = 0;
+    this.counters = { built: 0, kills: 0, pods: 0, cells: 0, deaths: 0 };
     this.nextId = 1;
-    this.nextShowerAt = TUNING.firstShower;
-    this.oreTimer = 0;
-    this.counters = { built: 0, shot: 0, kills: 0, impacts: 0, ore: 0 };
-    this.creatures = new Map();
-    this.nextSpawnAt = TUNING.firstCrawlers;
-    this.mission = null;
-    this.nextMissionAt = 3;
     this.version = 1;
-    this.growthDirty = false;
-    this.stats.bio = biosphere(this.stats);
-    this.playerDirs = [];
-    for (let i = 0; i < 34; i++) this.spawnOre();
+    this.hpDirty = false;
+    for (let i = 0; i < 22; i++) this.spawnCell([this.baseDir]);
   }
 
-  get waterR() {
-    return waterRadius(this.stats.water);
-  }
+  // ---- Helpers --------------------------------------------------------------
 
-  isUnderwater(dir, margin = 0.15) {
-    return this.terrain.surfaceRadius(dir) < this.waterR + margin;
-  }
-
-  treeCount() {
-    let n = 0;
-    for (const s of this.structures.values()) if (s.type === 'seed') n++;
-    return n;
-  }
-
-  /** Returns null when the structure can be placed, otherwise a human-readable reason. */
   placementError(type, dir) {
     if (!STRUCTURES[type]) return 'Unknown structure';
-    if (this.structures.size >= TUNING.maxStructures) return 'Structure limit reached';
-    if (type === 'seed' && this.treeCount() >= TUNING.maxTrees) return 'The forest is at capacity';
-    if (this.isUnderwater(dir)) return 'Too close to water';
+    const maxStructs = TUNING.structuresBase + TUNING.structuresPerPlayer * Math.max(1, this.players.size);
+    if (this.structures.size >= maxStructs) return `Building limit reached (${maxStructs})`;
+    if (metres(dir, this.baseDir) < TUNING.reactorClearance) return 'Too close to the reactor';
+    if (type === 'turret') {
+      const cap = TUNING.turretsBase + TUNING.turretsPerPlayer * Math.max(1, this.players.size);
+      const have = [...this.structures.values()].filter((s) => s.type === 'turret').length;
+      if (have >= cap) return `Turret limit reached (${cap})`;
+    }
     for (const o of this.structures.values()) {
-      const min = type === 'seed' && o.type === 'seed' ? TUNING.treeSpacing : TUNING.structSpacing;
-      if (dist(o.dir, dir) * R < min) return 'Too close to another structure';
+      if (metres(o.dir, dir) < TUNING.structSpacing) return 'Too close to another structure';
+    }
+    for (const c of this.colliders) {
+      if (metres(c.dir, dir) < c.r + 1) return 'Blocked by ruins';
     }
     return null;
   }
 
-  addStructure(type, dir, owner, growth = 0) {
-    const s = { id: this.nextId++, type, dir, hp: 100, growth, owner };
+  addStructure(type, dir, owner) {
+    const s = { id: this.nextId++, type, dir, hp: STRUCTURES[type].hp, owner, cooldown: 0 };
     this.structures.set(s.id, s);
     this.version++;
     return s;
   }
 
-  /** Spawns a crystal, usually within walking distance of a player so nobody hikes for ages. */
-  spawnOre(anchors = []) {
-    for (let tries = 0; tries < 12; tries++) {
-      const anchor = anchors.length && this.rand() < 0.75 ? anchors[Math.floor(this.rand() * anchors.length)] : null;
-      const dir = anchor ? offsetDir(anchor, this.rand, 8, 36, R) : randomDir(this.rand);
-      if (this.isUnderwater(dir, 0.3)) continue;
-      const id = this.nextId++;
-      this.ores.set(id, { id, dir });
-      this.version++;
-      return;
-    }
+  spawnCell(anchors = []) {
+    const anchor = anchors.length && this.rand() < 0.8 ? anchors[Math.floor(this.rand() * anchors.length)] : null;
+    const dir = anchor ? offsetDir(anchor, this.rand, 7, 34, R) : randomDir(this.rand);
+    const id = this.nextId++;
+    this.cells.set(id, { id, dir });
+    this.version++;
+  }
+
+  spawnEnemy(kind, near) {
+    const dir = offsetDir(near, this.rand, 0, 4, R);
+    const def = ENEMIES[kind];
+    // Tougher with more pilots and in later waves.
+    const scale = (1 + 0.3 * (Math.max(1, this.players.size) - 1)) * (1 + 0.07 * Math.max(0, this.wave - 1));
+    const hp = Math.ceil(def.hp * scale);
+    const id = this.nextId++;
+    this.enemies.set(id, { id, kind, dir, hp, maxHp: hp, attacking: false, retarget: 0, target: null, cooldown: 1 });
+  }
+
+  dropPod(target) {
+    const id = this.nextId++;
+    this.pods.set(id, { id, dir: target, from: offsetDir(target, this.rand, 8, 16, R), t0: this.simTime + 1, dur: 9 });
   }
 
   start() {
     if (this.phase !== 'lobby') return [];
     this.phase = 'play';
     this.playStart = this.simTime;
-    this.nextShowerAt = this.simTime + TUNING.firstShower;
-    this.nextSpawnAt = this.simTime + TUNING.firstCrawlers;
-    this.nextMissionAt = this.simTime + 3;
+    this.nextWaveAt = this.simTime + TUNING.firstWave;
     return [{ e: 'start' }];
   }
 
-  /** Advances the authoritative simulation. Returns events for the HUD and effects. */
-  step(dt, playerCount, playerDirs = []) {
-    this.playerDirs = playerDirs;
+  // ---- Simulation -----------------------------------------------------------
+
+  /** `players` is [{ id, dir }] for everyone currently connected. */
+  step(dt, players = []) {
     this.simTime += dt;
     if (this.phase !== 'play') return [];
     const events = [];
-    const s = this.stats;
-    const sun = sunDir(this.simTime);
+    const t = this.simTime;
 
-    let gen = 0;
-    let upkeep = 0;
-    let heaters = 0;
-    let scrubbers = 0;
-    let condensers = 0;
-    let treeMass = 0;
+    this.syncPlayers(players, events);
+
     for (const st of this.structures.values()) {
-      if (st.type === 'pylon') gen += 0.25 + 0.85 * Math.max(0, dot(st.dir, sun));
-      else if (st.type === 'heater') heaters++;
-      else if (st.type === 'scrubber') scrubbers++;
-      else if (st.type === 'condenser') condensers++;
-      else if (st.type === 'seed') treeMass += st.growth;
-      upkeep += TUNING.upkeep[st.type] || 0;
+      if (st.type === 'generator') this.energy += TUNING.genRate * dt;
     }
-    if (s.energy + (gen - upkeep) * dt >= 0) {
-      this.power = 1;
-      s.energy += (gen - upkeep) * dt;
-    } else {
-      this.power = clamp((s.energy / dt + gen) / upkeep, 0, 1);
-      s.energy = 0;
+    this.energy = Math.min(TUNING.maxEnergy, this.energy);
+
+    // Healing: med stations heal fast, everyone regenerates slowly out of combat.
+    const meds = [...this.structures.values()].filter((s) => s.type === 'medbay');
+    for (const p of this.players.values()) {
+      if (p.dead || !p.dir) continue;
+      let heal = t - p.lastHit > 5 ? TUNING.regen : 0;
+      if (meds.some((m) => metres(m.dir, p.dir) < TUNING.medRange)) heal += TUNING.medRate;
+      if (heal) p.hp = Math.min(TUNING.playerHp, p.hp + heal * dt);
     }
-    s.energy = Math.min(TUNING.maxEnergy, s.energy);
+    // The reactor slowly repairs itself between waves.
+    if (!this.waveActive) this.reactor.hp = Math.min(this.reactor.max, this.reactor.hp + 4 * dt);
 
-    const p = this.power;
-    const condEff = clamp((s.heat - 33) / 15, 0, 1);
-    s.heat += (0.3 * heaters * p - 0.02 * (s.heat - 8)) * dt;
-    s.water += (0.3 * condensers * p * condEff - 0.006 * s.water * (s.heat > 75 ? 2.5 : 1) - 0.003 * treeMass) * dt;
-    s.air += (0.24 * scrubbers * p + 0.02 * treeMass - 0.006 * s.air - 0.05 * this.creatures.size) * dt;
-    s.heat = clamp(s.heat, 0, 100);
-    s.water = clamp(s.water, 0, 100);
-    s.air = clamp(s.air, 0, 100);
+    this.stepWaves(dt, events);
+    this.stepEnemies(dt, events);
+    this.stepTurrets(dt, events);
+    this.stepPods(events);
 
-    this.stepTrees(dt, events);
-
-    s.life = Math.min(100, treeMass * 2.4);
-    s.bio = biosphere(s);
-
-    if (s.bio >= TUNING.winBio) this.hold += dt;
-    else this.hold = Math.max(0, this.hold - dt * 2);
-    if (this.hold >= TUNING.winHold) {
-      this.phase = 'won';
-      this.wonAt = this.simTime;
-      this.meteors.clear();
-      this.creatures.clear();
-      events.push({ e: 'won' });
-      return events;
+    this.cellTimer += dt;
+    if (this.cells.size < 16 + players.length * 3 && this.cellTimer > 3) {
+      this.cellTimer = 0;
+      this.spawnCell([this.baseDir, ...players.map((p) => p.dir).filter(Boolean)]);
     }
-    if (this.simTime - this.playStart >= TUNING.timeLimit) {
+
+    if (this.reactor.hp <= 0 && this.phase === 'play') {
+      this.reactor.hp = 0;
       this.phase = 'lost';
-      this.wonAt = this.simTime;
-      this.meteors.clear();
-      this.creatures.clear();
+      this.endedAt = t;
       events.push({ e: 'lost' });
-      return events;
     }
-
-    const oreTarget = 24 + playerCount * 4;
-    this.oreTimer += dt;
-    if (this.ores.size < oreTarget && this.oreTimer > 2.5) {
-      this.oreTimer = 0;
-      this.spawnOre(playerDirs);
-    }
-
-    this.stepMeteors(playerCount, events);
-    this.stepCreatures(dt, playerCount, events);
-    this.stepMission(events);
     return events;
   }
 
-  // ---- Blight crawlers: creatures that march on your base and eat it -------
-
-  spawnCreature(elapsed) {
-    const targets = [...this.structures.values()];
-    if (!targets.length) return;
-    const anchor = targets[Math.floor(this.rand() * targets.length)];
-    let dir = null;
-    for (let i = 0; i < 8 && !dir; i++) {
-      const d = offsetDir(anchor.dir, this.rand, 18, 30, R);
-      if (!this.isUnderwater(d, 0)) dir = d;
+  syncPlayers(list, events) {
+    const seen = new Set();
+    for (const { id, dir } of list) {
+      seen.add(id);
+      let p = this.players.get(id);
+      if (!p) {
+        p = { hp: TUNING.playerHp, dead: false, respawnAt: 0, lastHit: -99, dir: null };
+        this.players.set(id, p);
+      }
+      if (!p.dead) p.dir = dir;
+      if (p.dead && this.simTime >= p.respawnAt) {
+        p.dead = false;
+        p.hp = TUNING.playerHp;
+        p.dir = null;
+        events.push({ e: 'respawn', id });
+      }
     }
-    if (!dir) return;
-    const brute = elapsed > 150 && this.rand() < 0.22;
-    const id = this.nextId++;
-    this.creatures.set(id, {
-      id,
-      dir,
-      kind: brute ? 1 : 0,
-      hp: brute ? 5 : 2,
-      speed: brute ? 1.7 : 2.8,
-      target: null,
-      eating: false,
-    });
+    for (const id of this.players.keys()) if (!seen.has(id)) this.players.delete(id);
   }
 
-  stepCreatures(dt, playerCount, events) {
-    const t = this.simTime;
-    const elapsed = t - this.playStart;
-    if (t >= this.nextSpawnAt && this.structures.size) {
-      const maxAlive = 2 + playerCount + Math.floor(elapsed / 150);
-      const wave = Math.min(4, 1 + Math.floor(elapsed / 180) + Math.floor(playerCount / 3));
-      let n = 0;
-      for (let i = 0; i < wave && this.creatures.size < maxAlive; i++, n++) this.spawnCreature(elapsed);
-      this.nextSpawnAt = t + Math.max(10, 22 - elapsed / 40);
-      if (n >= 3) events.push({ e: 'swarm', n });
+  waveComposition(n) {
+    const p = Math.max(1, this.players.size);
+    const list = [];
+    const drones = 5 + n * 3 + (p - 1) * 4;
+    const brutes = n >= 2 ? Math.floor(n / 2) + Math.floor((p - 1) / 2) : 0;
+    const spitters = n >= 3 ? Math.floor(n / 2) : 0;
+    const pods = n >= 2 ? Math.floor(n / 2) + Math.floor((p - 1) / 2) : 0;
+    for (let i = 0; i < drones; i++) list.push({ kind: 0 });
+    for (let i = 0; i < brutes; i++) list.push({ kind: 1 });
+    for (let i = 0; i < spitters; i++) list.push({ kind: 2 });
+    for (let i = 0; i < pods; i++) list.push({ pod: true });
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rand() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
     }
-    for (const c of this.creatures.values()) {
-      let target = this.structures.get(c.target);
-      if (!target) {
-        // Crawlers go for machines first; the forest is only eaten once the base is gone.
-        let best = Infinity;
-        for (const st of this.structures.values()) {
-          const d = dist(st.dir, c.dir) + (st.type === 'seed' ? 10 : 0);
-          if (d < best) {
-            best = d;
-            target = st;
-          }
-        }
-        c.target = target?.id ?? null;
-      }
-      c.eating = false;
-      if (!target) continue;
-      const d = dist(c.dir, target.dir) * R;
-      if (d > 1.3) {
-        const k = Math.min(1, (c.speed * dt) / d);
-        c.dir = norm(c.dir.map((v, i) => v + (target.dir[i] - v) * k));
+    return list;
+  }
+
+  stepWaves(dt, events) {
+    const t = this.simTime;
+    if (!this.waveActive && t >= this.nextWaveAt) {
+      this.wave++;
+      this.waveActive = true;
+      this.queue = this.waveComposition(this.wave);
+      const gateCount = this.wave >= 6 ? 3 : this.wave >= 3 ? 2 : 1;
+      this.gates = Array.from({ length: gateCount }, () => offsetDir(this.baseDir, this.rand, 40, 52, R));
+      this.spawnTimer = 0;
+      events.push({ e: 'wave', n: this.wave, count: this.queue.length });
+    }
+    if (!this.waveActive) return;
+    this.spawnTimer -= dt;
+    if (this.queue.length && this.spawnTimer <= 0) {
+      this.spawnTimer = Math.max(0.35, 1.3 - this.wave * 0.08);
+      const next = this.queue.shift();
+      if (next.pod) this.dropPod(offsetDir(this.baseDir, this.rand, 6, 24, R));
+      else this.spawnEnemy(next.kind, this.gates[Math.floor(this.rand() * this.gates.length)]);
+    }
+    if (!this.queue.length && !this.enemies.size && !this.pods.size) {
+      this.waveActive = false;
+      const bonus = 25 + this.wave * 5;
+      this.energy = Math.min(TUNING.maxEnergy, this.energy + bonus);
+      events.push({ e: 'waveclear', n: this.wave, bonus });
+      if (this.wave >= TUNING.waves) {
+        this.phase = 'won';
+        this.endedAt = t;
+        events.push({ e: 'won' });
       } else {
-        c.eating = true;
-        target.hp -= (c.kind ? 26 : 13) * dt;
-        this.growthDirty = true;
-        if (target.hp <= 0) {
-          this.structures.delete(target.id);
-          this.version++;
-          events.push({ e: 'eaten', type: target.type, dir: target.dir });
-        }
+        this.nextWaveAt = t + TUNING.waveBreak;
       }
     }
   }
 
-  // ---- Missions: short bounties that keep something to chase -------------
-
-  newMission() {
-    const s = this.stats;
-    const pool = [
-      { kind: 'kill', n: 3 + Math.floor(this.rand() * 3), per: 14 },
-      { kind: 'ore', n: 4 + Math.floor(this.rand() * 3), per: 9 },
-      { kind: 'build', type: 'any', n: 3 + Math.floor(this.rand() * 2), per: 12 },
-      { kind: 'build', type: 'pylon', n: 2, per: 15 },
-    ];
-    if (s.heat >= 25 && s.air > 10) pool.push({ kind: 'build', type: 'seed', n: 4 + Math.floor(this.rand() * 3), per: 8 });
-    if (this.meteors.size || this.creatures.size > 1) pool.push(pool[0]);
-    const m = pool[Math.floor(this.rand() * pool.length)];
-    return {
-      id: this.nextId++,
-      kind: m.kind,
-      type: m.type || '',
-      n: m.n,
-      progress: 0,
-      reward: m.n * m.per,
-      expires: this.simTime + TUNING.missionTime,
-    };
-  }
-
-  stepMission(events) {
-    const t = this.simTime;
-    if (this.mission && t > this.mission.expires) {
-      events.push({ e: 'mission', ok: false });
-      this.mission = null;
-      this.nextMissionAt = t + 4;
-    }
-    if (!this.mission && t >= this.nextMissionAt) {
-      this.mission = this.newMission();
-      events.push({ e: 'newmission' });
-    }
-  }
-
-  progressMission(kind, type, events) {
-    const m = this.mission;
-    if (!m || m.kind !== kind) return;
-    if (kind === 'build' && m.type !== 'any' && m.type !== type) return;
-    m.progress++;
-    if (m.progress >= m.n) {
-      this.stats.energy = Math.min(TUNING.maxEnergy, this.stats.energy + m.reward);
-      events.push({ e: 'mission', ok: true, reward: m.reward });
-      this.mission = null;
-      this.nextMissionAt = this.simTime + 4;
-    }
-  }
-
-  stepTrees(dt, events) {
-    const s = this.stats;
-    const waterR = this.waterR;
-    const canSpread = s.water > 35 && s.air > 30 && this.treeCount() < TUNING.maxTrees;
-    for (const t of [...this.structures.values()]) {
-      if (t.type !== 'seed') continue;
-      const underwater = this.terrain.surfaceRadius(t.dir) < waterR - 0.1;
-      if (underwater) t.hp -= 6 * dt;
-      else if (s.heat > 80) t.hp -= 2.5 * dt;
-      else if (s.water > 12 && s.air > 15 && s.heat >= 25 && t.growth < 1) {
-        const q = Math.min(1, s.water / 40) * Math.min(1, s.air / 40) * (s.heat >= 35 && s.heat <= 72 ? 1 : 0.5);
-        t.growth = Math.min(1, t.growth + (dt / 35) * q);
-        this.growthDirty = true;
+  /** Picks what an alien goes after: a nearby pilot, a nearby building, or the reactor. */
+  chooseTarget(e) {
+    let best = null;
+    let bestD = TUNING.aggroRange;
+    for (const [id, p] of this.players) {
+      if (p.dead || !p.dir) continue;
+      const d = metres(p.dir, e.dir);
+      if (d < bestD) {
+        bestD = d;
+        best = { type: 'p', id };
       }
-      if (t.hp <= 0) {
-        this.structures.delete(t.id);
+    }
+    if (best) return best;
+    bestD = 11;
+    for (const st of this.structures.values()) {
+      // Barricades pull aggro from further away.
+      const d = metres(st.dir, e.dir) - (st.type === 'barricade' ? 5 : 0);
+      if (d < bestD) {
+        bestD = d;
+        best = { type: 's', id: st.id };
+      }
+    }
+    return best || { type: 'r' };
+  }
+
+  targetDir(target) {
+    if (!target) return null;
+    if (target.type === 'r') return this.baseDir;
+    if (target.type === 's') return this.structures.get(target.id)?.dir ?? null;
+    const p = this.players.get(target.id);
+    return p && !p.dead ? p.dir : null;
+  }
+
+  damageTarget(target, amount, events) {
+    if (target.type === 'r') {
+      this.reactor.hp -= amount;
+      this.reactorHitAt = this.simTime;
+    } else if (target.type === 's') {
+      const st = this.structures.get(target.id);
+      if (!st) return;
+      st.hp -= amount;
+      this.hpDirty = true;
+      if (st.hp <= 0) {
+        this.structures.delete(st.id);
         this.version++;
-        events.push({ e: 'wither', id: t.id });
+        events.push({ e: 'destroyed', type: st.type, dir: st.dir });
+      }
+    } else {
+      this.hurtPlayer(target.id, amount, events);
+    }
+  }
+
+  hurtPlayer(id, amount, events) {
+    const p = this.players.get(id);
+    if (!p || p.dead) return;
+    p.hp -= amount;
+    p.lastHit = this.simTime;
+    if (p.hp <= 0) {
+      p.hp = 0;
+      p.dead = true;
+      p.respawnAt = this.simTime + TUNING.respawn;
+      this.counters.deaths++;
+      events.push({ e: 'down', id });
+    }
+  }
+
+  stepEnemies(dt, events) {
+    for (const e of this.enemies.values()) {
+      const def = ENEMIES[e.kind];
+      e.retarget -= dt;
+      let tdir = this.targetDir(e.target);
+      if (e.retarget <= 0 || !tdir) {
+        e.retarget = 0.6;
+        e.target = this.chooseTarget(e);
+        tdir = this.targetDir(e.target);
+      }
+      if (!tdir) continue;
+      const reach = e.target.type === 'r' ? Math.max(def.reach, 3.5) : def.reach;
+      const d = metres(e.dir, tdir);
+      e.attacking = d <= reach;
+      if (!e.attacking) {
+        const k = Math.min(1, (def.speed * dt) / d);
+        e.dir = norm(e.dir.map((v, i) => v + (tdir[i] - v) * k));
         continue;
       }
-      if (canSpread && t.growth >= 1 && this.rand() < 0.03 * dt) {
-        const dir = offsetDir(t.dir, this.rand, 2, 4.5, R);
-        if (!this.placementError('seed', dir)) this.addStructure('seed', dir, 'planet', 0.05);
+      if (e.kind === 2) {
+        e.cooldown -= dt;
+        if (e.cooldown <= 0) {
+          e.cooldown = def.rate;
+          this.damageTarget(e.target, def.dmg, events);
+          events.push({ e: 'spit', from: roundVec(e.dir, 3), to: roundVec(tdir, 3) });
+        }
+      } else {
+        this.damageTarget(e.target, def.dmg * dt, events);
       }
     }
   }
 
-  stepMeteors(playerCount, events) {
-    const t = this.simTime;
-    if (t >= this.nextShowerAt) {
-      const elapsed = t - this.playStart;
-      const count = Math.min(8, 2 + Math.floor(playerCount / 2) + Math.floor(elapsed / 200));
-      const targets = [...this.structures.values()];
-      for (let i = 0; i < count; i++) {
-        const dir =
-          targets.length && this.rand() < 0.7
-            ? offsetDir(targets[Math.floor(this.rand() * targets.length)].dir, this.rand, 0, 3, R)
-            : randomDir(this.rand);
-        const id = this.nextId++;
-        this.meteors.set(id, { id, dir, from: offsetDir(dir, this.rand, 8, 16, R), t0: t + 2 + i * 1.4, dur: 9 });
-      }
-      this.nextShowerAt = t + 35 + this.rand() * 20;
-      events.push({ e: 'shower', n: count });
-    }
-    for (const m of [...this.meteors.values()]) {
-      if (t < m.t0 + m.dur) continue;
-      this.meteors.delete(m.id);
-      let lost = 0;
-      for (const st of [...this.structures.values()]) {
-        if (dist(st.dir, m.dir) * R < TUNING.blastRadius) {
-          this.structures.delete(st.id);
-          lost++;
+  killEnemy(e, events, by) {
+    this.enemies.delete(e.id);
+    const def = ENEMIES[e.kind];
+    // Only pilots earn energy from kills, so turrets support the team instead of replacing it.
+    const bounty = by.turret ? 0 : def.bounty;
+    this.energy = Math.min(TUNING.maxEnergy, this.energy + bounty);
+    this.counters.kills++;
+    const pos = roundVec(e.dir.map((v) => v * (this.terrain.surfaceRadius(e.dir) + 0.8)), 2);
+    events.push({ e: 'kill', id: e.id, kind: e.kind, pos, bounty, by: by.name, pid: by.id ?? null });
+  }
+
+  stepTurrets(dt, events) {
+    for (const st of this.structures.values()) {
+      if (st.type !== 'turret') continue;
+      st.cooldown -= dt;
+      if (st.cooldown > 0) continue;
+      let best = null;
+      let bestD = TUNING.turretRange;
+      for (const e of this.enemies.values()) {
+        const d = metres(e.dir, st.dir);
+        if (d < bestD) {
+          bestD = d;
+          best = e;
         }
       }
-      if (lost) this.version++;
-      const s = this.stats;
-      s.air = Math.max(0, s.air - 3);
-      s.water = Math.min(100, s.water + 2.5);
-      s.heat = Math.min(100, s.heat + 2);
-      this.counters.impacts++;
-      events.push({ e: 'impact', dir: m.dir, lost });
+      if (!best) continue;
+      st.cooldown = TUNING.turretRate;
+      best.hp -= 1;
+      if (best.hp <= 0) this.killEnemy(best, events, { name: 'Turret', turret: true });
     }
   }
 
-  /** Validates and applies a player action. Only the host calls this. */
+  stepPods(events) {
+    for (const p of [...this.pods.values()]) {
+      if (this.simTime < p.t0 + p.dur) continue;
+      this.pods.delete(p.id);
+      for (let i = 0; i < 3; i++) this.spawnEnemy(0, p.dir);
+      for (const st of [...this.structures.values()]) {
+        if (metres(st.dir, p.dir) < TUNING.blastRadius) this.damageTarget({ type: 's', id: st.id }, 90, events);
+      }
+      for (const [id, pl] of this.players) {
+        if (!pl.dead && pl.dir && metres(pl.dir, p.dir) < TUNING.blastRadius) this.hurtPlayer(id, 30, events);
+      }
+      if (metres(p.dir, this.baseDir) < TUNING.blastRadius + 2) {
+        this.reactor.hp -= 60;
+        this.reactorHitAt = this.simTime;
+      }
+      events.push({ e: 'podland', dir: p.dir });
+    }
+  }
+
+  // ---- Player actions (host only) -------------------------------------------
+
   handleAction(act, by) {
     if (!act || typeof act !== 'object') return [];
-    const name = by.name;
     if (act.k === 'start') return this.start();
     if (act.k === 'restart') {
       this.reset(newSeed(), 'play');
-      this.nextShowerAt = TUNING.firstShower;
       return [{ e: 'restart' }];
     }
     if (this.phase !== 'play') return [];
-    const s = this.stats;
+    if (this.players.get(by.id)?.dead) return [];
 
     if (act.k === 'build') {
       const def = STRUCTURES[act.type];
       if (!def || !Array.isArray(act.dir)) return [];
       const dir = norm(act.dir.map(Number));
       if (dir.some((v) => !Number.isFinite(v))) return [];
-      if (s.energy < def.cost) return [{ e: 'deny', to: by.id, msg: 'Not enough energy' }];
+      if (this.energy < def.cost) return [{ e: 'deny', to: by.id, msg: 'Not enough energy' }];
       const err = this.placementError(act.type, dir);
       if (err) return [{ e: 'deny', to: by.id, msg: err }];
-      s.energy -= def.cost;
+      this.energy -= def.cost;
       const st = this.addStructure(act.type, dir, by.id);
       this.counters.built++;
-      const events = [{ e: 'build', type: act.type, id: st.id, by: name, pid: by.id, dir }];
-      this.progressMission('build', act.type, events);
-      return events;
+      return [{ e: 'build', type: act.type, id: st.id, by: by.name, pid: by.id, dir }];
     }
     if (act.k === 'collect') {
-      const ore = this.ores.get(act.id);
-      if (!ore) return [];
-      this.ores.delete(ore.id);
+      const cell = this.cells.get(act.id);
+      if (!cell) return [];
+      this.cells.delete(cell.id);
       this.version++;
-      s.energy = Math.min(TUNING.maxEnergy, s.energy + TUNING.oreValue);
-      this.counters.ore++;
-      const events = [{ e: 'ore', by: name, dir: ore.dir, pid: by.id }];
-      this.progressMission('ore', '', events);
-      return events;
+      this.energy = Math.min(TUNING.maxEnergy, this.energy + TUNING.cellValue);
+      this.counters.cells++;
+      return [{ e: 'cell', dir: cell.dir, pid: by.id }];
     }
     if (act.k === 'hit') {
-      const c = this.creatures.get(act.id);
-      if (c) {
-        c.hp -= 1;
-        const pos = roundVec(c.dir.map((v) => v * (this.terrain.surfaceRadius(c.dir) + 0.6)), 2);
-        if (c.hp > 0) return [{ e: 'hurt', id: c.id, pos, pid: by.id }];
-        this.creatures.delete(c.id);
-        const bounty = c.kind ? TUNING.bruteBounty : TUNING.crawlerBounty;
-        s.energy = Math.min(TUNING.maxEnergy, s.energy + bounty);
-        this.counters.kills++;
-        const events = [{ e: 'kill', id: c.id, by: name, pid: by.id, pos, brute: c.kind, bounty }];
-        this.progressMission('kill', '', events);
+      const e = this.enemies.get(act.id);
+      if (e) {
+        e.hp -= 1;
+        const events = [];
+        if (e.hp <= 0) this.killEnemy(e, events, by);
+        else events.push({ e: 'hurt', id: e.id, pid: by.id });
         return events;
       }
-      const m = this.meteors.get(act.id);
-      if (!m || this.simTime < m.t0 || this.simTime > m.t0 + m.dur) return [];
-      const pos = meteorPos(m, this.simTime, this.terrain);
-      this.meteors.delete(m.id);
-      s.energy = Math.min(TUNING.maxEnergy, s.energy + TUNING.meteorBounty);
-      this.counters.shot++;
-      const events = [{ e: 'shot', id: m.id, by: name, pid: by.id, pos: roundVec(pos, 2) }];
-      this.progressMission('kill', '', events);
-      return events;
+      const p = this.pods.get(act.id);
+      if (!p || this.simTime < p.t0 || this.simTime > p.t0 + p.dur) return [];
+      const pos = podPos(p, this.simTime, this.terrain);
+      this.pods.delete(p.id);
+      this.energy = Math.min(TUNING.maxEnergy, this.energy + TUNING.podBounty);
+      this.counters.pods++;
+      return [{ e: 'podshot', id: p.id, by: by.name, pid: by.id, pos: roundVec(pos, 2) }];
     }
     if (act.k === 'salvage') {
       const st = this.structures.get(act.id);
       if (!st) return [];
       this.structures.delete(st.id);
       this.version++;
-      const refund = st.type === 'seed' ? 0 : Math.floor(STRUCTURES[st.type].cost * 0.5);
-      s.energy = Math.min(TUNING.maxEnergy, s.energy + refund);
-      return [{ e: 'salvage', type: st.type, by: name, pid: by.id, refund, dir: st.dir }];
+      const refund = Math.floor(STRUCTURES[st.type].cost * 0.5);
+      this.energy = Math.min(TUNING.maxEnergy, this.energy + refund);
+      return [{ e: 'salvage', type: st.type, by: by.name, pid: by.id, refund, dir: st.dir }];
     }
     return [];
   }
 
-  // ---- Snapshots -------------------------------------------------------------
+  // ---- Snapshots ------------------------------------------------------------
 
   serializeWorld() {
     return {
@@ -456,36 +461,31 @@ export class World {
       v: this.version,
       seed: this.seed,
       n: this.nextId,
-      s: [...this.structures.values()].map((st) => [
-        st.id,
-        STRUCT_TYPES.indexOf(st.type),
-        ...roundVec(st.dir, 4),
-        Math.round(st.hp),
-        round(st.growth, 2),
-      ]),
-      o: [...this.ores.values()].map((o) => [o.id, ...roundVec(o.dir, 4)]),
+      s: [...this.structures.values()].map((st) => [st.id, STRUCT_TYPES.indexOf(st.type), ...roundVec(st.dir, 4), Math.round(st.hp)]),
+      o: [...this.cells.values()].map((c) => [c.id, ...roundVec(c.dir, 4)]),
     };
   }
 
   serializeTick() {
-    const s = this.stats;
     return {
       t: 'k',
       seed: this.seed,
       st: round(this.simTime, 2),
       ph: this.phase,
       ps: round(this.playStart, 2),
-      wa: round(this.wonAt, 2),
-      s: [s.air, s.water, s.heat, s.life, s.energy, s.bio].map((v) => round(v, 1)),
-      pw: round(this.power, 2),
-      h: round(this.hold, 1),
-      ns: round(this.nextShowerAt, 1),
+      ea: round(this.endedAt, 2),
+      en: round(this.energy, 1),
+      rh: Math.round(this.reactor.hp),
+      rt: round(this.reactorHitAt, 1),
+      wv: this.wave,
+      wa: this.waveActive ? 1 : 0,
+      nw: round(this.nextWaveAt, 1),
+      q: this.queue.length,
+      g: this.gates.map((d) => roundVec(d, 3)),
       c: this.counters,
-      m: [...this.meteors.values()].map((m) => [m.id, ...roundVec(m.dir, 4), ...roundVec(m.from, 4), round(m.t0, 2), m.dur]),
-      cr: [...this.creatures.values()].map((c) => [c.id, ...roundVec(c.dir, 4), c.hp, c.kind, c.eating ? 1 : 0]),
-      ms: this.mission
-        ? [this.mission.id, this.mission.kind, this.mission.type, this.mission.n, this.mission.progress, this.mission.reward, round(this.mission.expires, 1)]
-        : null,
+      pl: [...this.players.entries()].map(([id, p]) => [id, Math.round(p.hp), p.dead ? 1 : 0, round(p.respawnAt, 1)]),
+      e: [...this.enemies.values()].map((e) => [e.id, e.kind, ...roundVec(e.dir, 4), e.hp, e.maxHp, e.attacking ? 1 : 0]),
+      m: [...this.pods.values()].map((p) => [p.id, ...roundVec(p.dir, 4), ...roundVec(p.from, 4), round(p.t0, 2), p.dur]),
     };
   }
 
@@ -494,9 +494,9 @@ export class World {
     this.nextId = Math.max(this.nextId, msg.n || 0);
     this.version = msg.v;
     this.structures = new Map(
-      msg.s.map(([id, ti, x, y, z, hp, growth]) => [id, { id, type: STRUCT_TYPES[ti], dir: [x, y, z], hp, growth }]),
+      msg.s.map(([id, ti, x, y, z, hp]) => [id, { id, type: STRUCT_TYPES[ti], dir: [x, y, z], hp, cooldown: 0 }]),
     );
-    this.ores = new Map(msg.o.map(([id, x, y, z]) => [id, { id, dir: [x, y, z] }]));
+    this.cells = new Map(msg.o.map(([id, x, y, z]) => [id, { id, dir: [x, y, z] }]));
   }
 
   applyTick(msg) {
@@ -505,37 +505,41 @@ export class World {
     this.simTime = Math.abs(drift) > 1 ? msg.st : this.simTime + drift * 0.25;
     this.phase = msg.ph;
     this.playStart = msg.ps;
-    this.wonAt = msg.wa;
-    const [air, water, heat, life, energy, bio] = msg.s;
-    Object.assign(this.stats, { air, water, heat, life, energy, bio });
-    this.power = msg.pw;
-    this.hold = msg.h;
-    this.nextShowerAt = msg.ns;
+    this.endedAt = msg.ea;
+    this.energy = msg.en;
+    this.reactor.hp = msg.rh;
+    this.reactorHitAt = msg.rt;
+    this.wave = msg.wv;
+    this.waveActive = !!msg.wa;
+    this.nextWaveAt = msg.nw;
+    this.queue = new Array(msg.q).fill({ kind: 0 });
+    this.gates = msg.g;
     this.counters = msg.c;
-    this.creatures = new Map(
-      (msg.cr || []).map(([id, x, y, z, hp, kind, eating]) => [
-        id,
-        { id, dir: [x, y, z], hp, kind, eating: !!eating, speed: kind ? 1.7 : 2.8, target: null },
-      ]),
-    );
-    const ms = msg.ms;
-    this.mission = ms ? { id: ms[0], kind: ms[1], type: ms[2], n: ms[3], progress: ms[4], reward: ms[5], expires: ms[6] } : null;
-    this.meteors = new Map(
-      msg.m.map(([id, dx, dy, dz, fx, fy, fz, t0, dur]) => [id, { id, dir: [dx, dy, dz], from: [fx, fy, fz], t0, dur }]),
-    );
+    const players = new Map();
+    for (const [id, hp, dead, respawnAt] of msg.pl) {
+      const prev = this.players.get(id);
+      players.set(id, { hp, dead: !!dead, respawnAt, lastHit: prev?.lastHit ?? -99, dir: prev?.dir ?? null });
+    }
+    this.players = players;
+    const enemies = new Map();
+    for (const [id, kind, x, y, z, hp, maxHp, attacking] of msg.e) {
+      enemies.set(id, { id, kind, dir: [x, y, z], hp, maxHp, attacking: !!attacking, retarget: 0, target: null, cooldown: 1 });
+    }
+    this.enemies = enemies;
+    this.pods = new Map(msg.m.map(([id, dx, dy, dz, fx, fy, fz, t0, dur]) => [id, { id, dir: [dx, dy, dz], from: [fx, fy, fz], t0, dur }]));
   }
 
-  /** A lush, pre-built planet for the title screen. */
+  /** A defended colony for the title screen. */
   static demo() {
     const w = new World(1337);
     w.phase = 'demo';
-    Object.assign(w.stats, { air: 80, water: 62, heat: 55, life: 70 });
     const rand = mulberry32(99);
-    for (let i = 0; i < 140 && w.structures.size < 90; i++) {
-      const dir = randomDir(rand);
-      const type = i % 9 === 0 ? STRUCT_TYPES[Math.floor(rand() * 4)] : 'seed';
-      if (!w.placementError(type, dir)) w.addStructure(type, dir, 'demo', type === 'seed' ? 0.4 + rand() * 0.6 : 0);
+    for (let i = 0; i < 40 && w.structures.size < 12; i++) {
+      const dir = offsetDir(w.baseDir, rand, 6, 16, R);
+      const type = STRUCT_TYPES[i % STRUCT_TYPES.length];
+      if (!w.placementError(type, dir)) w.addStructure(type, dir, 'demo');
     }
+    for (let i = 0; i < 6; i++) w.spawnEnemy(i % 3, offsetDir(w.baseDir, rand, 20, 30, R));
     return w;
   }
 }

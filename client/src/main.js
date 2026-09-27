@@ -1,8 +1,8 @@
 import './styles.css';
 import * as THREE from 'three';
 import { GameRenderer } from './render/scene.js';
-import { World, meteorPos } from './sim/world.js';
-import { STRUCTURES, STRUCT_TYPES, PLAYER_COLORS, TUNING } from './sim/defs.js';
+import { World, podPos } from './sim/world.js';
+import { STRUCTURES, STRUCT_TYPES, PLAYER_COLORS, TUNING, ENEMIES, STORY, RADIO } from './sim/defs.js';
 import { PLANET_RADIUS as R } from './sim/terrain.js';
 import { dist } from './sim/vec.js';
 import { Session } from './net/session.js';
@@ -11,7 +11,7 @@ import { createTransport, lookupRoom, makeRoomCode, makePlayerId } from './net/a
 import { LocalPlayer } from './game/controller.js';
 import { Input } from './game/input.js';
 import { Sound } from './audio.js';
-import { Hud, toast, renderPlayerList, formatTime, missionText } from './ui/hud.js';
+import { Hud, toast, renderPlayerList, formatTime } from './ui/hud.js';
 import { Juice } from './ui/juice.js';
 
 const $ = (id) => document.getElementById(id);
@@ -43,14 +43,20 @@ let moodTimer = 0;
 let orbitAngle = 0.6;
 let radarTimer = 0;
 let jetSoundTimer = 0;
-const pendingOre = new Map();
+let storyOpen = false;
+let storySeen = false;
+let wasDead = false;
+let lastHp = TUNING.playerHp;
+let hurtSoundAt = 0;
+let playersTimer = 0;
+const pendingCells = new Map();
 
 // ---------------------------------------------------------------- profile
 
 function loadProfile() {
   let saved = {};
   try {
-    saved = JSON.parse(localStorage.getItem('seedfall:profile') || '{}');
+    saved = JSON.parse(localStorage.getItem('ares:profile') || '{}');
   } catch {
     saved = {};
   }
@@ -62,7 +68,7 @@ function loadProfile() {
 
 function saveProfile() {
   try {
-    localStorage.setItem('seedfall:profile', JSON.stringify(profile));
+    localStorage.setItem('ares:profile', JSON.stringify(profile));
   } catch {
     // storage unavailable; the profile just won't persist
   }
@@ -202,7 +208,7 @@ function leaveSession() {
 function wireSession(s) {
   s.onMembers = (members) => {
     renderPlayerList($('lobby-players'), members, s.hostId, meId);
-    renderPlayerList($('hud-players'), members, s.hostId, meId);
+    renderPlayerList($('hud-players'), members, s.hostId, meId, s.world);
     updateLobbyButton();
     updateVictoryButtons();
   };
@@ -269,15 +275,76 @@ function onPhase(phase) {
 function enterGame() {
   showScreen('game');
   player.spawn(session.world);
-  hud.history = [];
+  wasDead = false;
+  lastHp = TUNING.playerHp;
+  $('downed').classList.add('hidden');
   $('hud-room').textContent = session.solo ? 'Solo' : session.room;
-  toast('Click the planet to take control. Press H for the field manual.', '', 6000);
+  if (!storySeen) showStory();
+  else toast('Click the screen to take control. Press H for the field manual.', '', 5000);
+}
+
+// ---------------------------------------------------------------- story
+
+/** The opening transmission: the story types in line by line, then the three-card briefing. */
+function showStory() {
+  storySeen = true;
+  storyOpen = true;
+  input.unlock();
+  const list = $('story-lines');
+  list.innerHTML = '';
+  $('briefing').classList.add('hidden');
+  $('story-go').textContent = 'Skip';
+  $('story').classList.remove('hidden');
+  let i = 0;
+  const next = () => {
+    if (!storyOpen) return;
+    if (i < STORY.length) {
+      const [when, text] = STORY[i];
+      const li = document.createElement('li');
+      if (i === STORY.length - 1) li.className = 'mission';
+      li.innerHTML = '<b></b><span></span>';
+      li.firstChild.textContent = when;
+      li.lastChild.textContent = text;
+      list.appendChild(li);
+      sound.play('type');
+      i++;
+      storyTimer = setTimeout(next, 1700);
+    } else {
+      $('briefing').classList.remove('hidden');
+      $('story-go').textContent = 'Defend the colony';
+    }
+  };
+  next();
+}
+
+let storyTimer = null;
+function closeStory() {
+  if (!storyOpen) return;
+  // First press finishes the text; the second one starts the game.
+  if ($('briefing').classList.contains('hidden')) {
+    clearTimeout(storyTimer);
+    const list = $('story-lines');
+    list.innerHTML = STORY.map(
+      ([w, t], i) => `<li class="${i === STORY.length - 1 ? 'mission' : ''}"><b>${w}</b><span>${t}</span></li>`,
+    ).join('');
+    $('briefing').classList.remove('hidden');
+    $('story-go').textContent = 'Defend the colony';
+    return;
+  }
+  storyOpen = false;
+  $('story').classList.add('hidden');
+  sound.play('ui');
+  toast('Click the screen to take control. Press H for the field manual.', '', 5000);
 }
 
 // ---------------------------------------------------------------- gameplay
 
 function proximity(dir) {
   return Math.max(0.15, 1 - (dist(dir, player.dir.toArray()) * R) / 55);
+}
+
+function surfacePoint(dir, lift) {
+  return new THREE.Vector3(...dir).multiplyScalar(session.world.terrain.surfaceRadius(dir) + lift);
 }
 
 function handleEvents(events) {
@@ -290,70 +357,68 @@ function handleEvents(events) {
         if (ev.pid !== meId) toast(`${ev.by} built a ${def.name}`);
         break;
       }
-      case 'ore':
-        renderer.sparkle(ev.dir, 0x8ff7ff, 0);
+      case 'cell':
+        renderer.sparkle(ev.dir, 0x5fc8ff, 0);
         if (ev.pid === meId) {
           sound.play('collect');
-          juice.float(new THREE.Vector3(...ev.dir).multiplyScalar(session.world.terrain.surfaceRadius(ev.dir) + 2.5), `+${TUNING.oreValue}⚡`, '#8ff7ff');
+          juice.float(surfacePoint(ev.dir, 2.5), `+${TUNING.cellValue}⚡`, '#8fd8ff');
         }
         break;
-      case 'shot': {
-        renderer.meteorDestroyed(ev.pos);
+      case 'podshot': {
+        renderer.podDestroyed(ev.pos);
         const p = new THREE.Vector3(...ev.pos);
         sound.play('hit', proximity(p.clone().normalize().toArray()));
-        juice.float(p, `+${TUNING.meteorBounty}⚡`, '#ffb14a');
-        if (ev.pid === meId) onMyKill('METEOR DOWN');
-        else toast(`☄ ${ev.by} shot down a meteor`);
+        juice.float(p, `+${TUNING.podBounty}⚡`, '#7dff5a');
+        if (ev.pid === meId) onMyKill('Pod destroyed');
+        else toast(`☄ ${ev.by} shot down a drop pod`);
         break;
       }
+      case 'podland':
+        renderer.podLanded(ev.dir);
+        sound.play('boom', proximity(ev.dir));
+        toast('☄ A drop pod landed. More Xal incoming!', 'bad');
+        break;
       case 'kill': {
-        renderer.creatureDeath(ev.pos, ev.brute);
+        renderer.alienDeath(ev.pos, ev.kind);
         const p = new THREE.Vector3(...ev.pos);
         sound.play('squish', proximity(p.clone().normalize().toArray()));
-        juice.float(p, `+${ev.bounty}⚡`, '#ff7ae8');
-        if (ev.pid === meId) onMyKill(ev.brute ? 'BRUTE DOWN' : null);
+        if (ev.bounty) juice.float(p, `+${ev.bounty}⚡`, '#7dff5a');
+        if (ev.pid === meId) onMyKill(ev.kind === 1 ? 'Brute down' : null);
         break;
       }
       case 'hurt':
-        renderer.flashCreature(ev.id);
+        renderer.flashEnemy(ev.id);
         if (ev.pid === meId) {
           juice.hitmarker();
           sound.play('squish', 0.4);
         }
         break;
-      case 'eaten':
-        renderer.sparkle(ev.dir, 0xb04bff);
-        toast(`👾 Crawlers devoured a ${STRUCTURES[ev.type].name}!`, 'bad');
-        if (proximity(ev.dir) > 0.6) juice.hurt();
+      case 'spit':
+        renderer.acid(ev.from, ev.to);
+        sound.play('spit', proximity(ev.from));
         break;
-      case 'swarm':
-        juice.banner('Blight swarm', '#ff5ae0', `${ev.n} crawlers are heading for your base`);
+      case 'destroyed':
+        renderer.sparkle(ev.dir, 0xff7a4a);
+        sound.play('boom', proximity(ev.dir) * 0.6);
+        toast(`💥 The Xal destroyed a ${STRUCTURES[ev.type].name}!`, 'bad');
+        break;
+      case 'wave': {
+        const line = RADIO[(ev.n - 1) % RADIO.length];
+        juice.banner(`Wave ${ev.n}`, '#ff5a6a', `${ev.count} hostiles incoming`, 3000);
+        toast(`📻 CMDR. REYES: ${line}`, 'warn', 7000);
         sound.play('swarm');
-        break;
-      case 'newmission':
-        if (session.world.mission) {
-          toast(`🎯 New bounty: ${missionText(session.world.mission)} (+${session.world.mission.reward}⚡)`, 'warn');
-          sound.play('ui');
-        }
-        break;
-      case 'mission':
-        if (ev.ok) {
-          juice.banner('Bounty complete', '#ffd166', `+${ev.reward}⚡ for the team`);
-          sound.play('bounty');
-        } else toast('Bounty expired. A new one is coming.', 'bad');
-        break;
-      case 'lost':
-        sound.play('lose');
-        break;
-      case 'impact':
-        renderer.impact(ev.dir);
-        sound.play('boom', proximity(ev.dir));
-        if (proximity(ev.dir) > 0.7) juice.hurt();
-        if (ev.lost) toast(`💥 Impact! ${ev.lost} structure${ev.lost > 1 ? 's' : ''} destroyed.`, 'bad');
-        break;
-      case 'shower':
-        juice.banner('Meteor shower', '#ff7a4a', `${ev.n} meteors incoming. Protect the red rings!`);
         sound.play('alarm');
+        break;
+      }
+      case 'waveclear':
+        juice.banner(`Wave ${ev.n} cleared`, '#7cf7d4', `+${ev.bonus}⚡ · Beacon ${Math.round((ev.n / TUNING.waves) * 100)}% charged`);
+        sound.play('bounty');
+        break;
+      case 'down':
+        if (ev.id !== meId) toast(`☠ ${session.memberName(ev.id)} is down!`, 'bad');
+        break;
+      case 'respawn':
+        if (ev.id !== meId) toast(`${session.memberName(ev.id)} is back in the fight.`);
         break;
       case 'deny':
         if (ev.to === meId) {
@@ -364,13 +429,16 @@ function handleEvents(events) {
       case 'salvage':
         renderer.sparkle(ev.dir, 0xffd166);
         if (ev.pid !== meId) toast(`${ev.by} salvaged a ${STRUCTURES[ev.type].name}`);
-        else toast(`Salvaged ${STRUCTURES[ev.type].name}${ev.refund ? ` (+${ev.refund}⚡)` : ''}`);
+        else toast(`Salvaged ${STRUCTURES[ev.type].name} (+${ev.refund}⚡)`);
         break;
       case 'won':
         sound.play('win');
         break;
+      case 'lost':
+        sound.play('lose');
+        break;
       case 'restart':
-        toast('🌍 A new planet has been generated.', 'warn');
+        toast('🔄 A new colony defence begins.', 'warn');
         break;
       default:
     }
@@ -382,11 +450,11 @@ function onMyKill(label) {
   juice.hitmarker();
   if (streak >= 2) sound.play('streak', streak);
   const names = { 2: 'Double kill', 3: 'Triple kill', 4: 'Quad kill' };
-  if (streak >= 2) juice.banner(names[streak] || `${streak}× Rampage`, '#ffd166');
+  if (streak >= 2) juice.banner(names[streak] || `${streak}× Rampage`, '#ffd166', '', 1300);
   else if (label) juice.banner(label, '#ffb14a', '', 1200);
 }
 
-/** Aim assist: the meteor or crawler closest to the crosshair, within a small cone. */
+/** Aim assist: the alien or drop pod closest to the crosshair, within a small cone. */
 function findTarget(world) {
   const cam = renderer.camera.position;
   let best = null;
@@ -400,14 +468,15 @@ function findTarget(world) {
       best = { id, p };
     }
   };
-  for (const m of world.meteors.values()) {
-    if (world.simTime < m.t0) continue;
-    consider(m.id, new THREE.Vector3(...meteorPos(m, world.simTime, world.terrain)), 0.2);
+  for (const pod of world.pods.values()) {
+    if (world.simTime < pod.t0) continue;
+    consider(pod.id, new THREE.Vector3(...podPos(pod, world.simTime, world.terrain)), 0.2);
   }
-  for (const c of world.creatures.values()) {
-    const entry = renderer.creatures.get(c.id);
-    const p = entry ? entry.obj.position.clone().addScaledVector(entry.dir, c.kind ? 1.1 : 0.6) : null;
-    if (p) consider(c.id, p, 0.16);
+  for (const e of world.enemies.values()) {
+    const entry = renderer.enemies.get(e.id);
+    if (!entry) continue;
+    const lift = e.kind === 1 ? 1.9 : e.kind === 2 ? 1.8 : 0.8;
+    consider(e.id, entry.obj.position.clone().addScaledVector(entry.up, lift), 0.17);
   }
   return best;
 }
@@ -417,19 +486,22 @@ function gunPosition() {
   return player.position().addScaledVector(player.dir, 1.05).addScaledVector(right, 0.5);
 }
 
+function isDead() {
+  return !!session?.world.players.get(meId)?.dead;
+}
+
 function fire() {
-  if (fireCooldown > 0 || !session) return;
-  fireCooldown = 0.22;
+  if (fireCooldown > 0 || !session || isDead()) return;
+  fireCooldown = 0.2;
   const world = session.world;
   const target = findTarget(world);
   const from = gunPosition();
   const to = target ? target.p : renderer.camera.position.clone().addScaledVector(player.aim, 70);
   renderer.fx.beam(from, to, profile.color);
+  renderer.fx.emit(from, player.aim.clone().multiplyScalar(6), profile.color, 4, 0.2, 2);
   sound.play('shoot');
   const r = (v) => Math.round(v * 100) / 100;
   session.sendShot({ o: from.toArray().map(r), e: to.toArray().map(r), c: profile.color });
-  const muzzle = player.aim.clone().multiplyScalar(6);
-  renderer.fx.emit(from, muzzle, profile.color, 4, 0.2, 2);
   if (target) session.act({ k: 'hit', id: target.id });
 }
 
@@ -437,7 +509,7 @@ function tryBuild() {
   const world = session.world;
   const dir = player.buildDir();
   const def = STRUCTURES[selected];
-  const err = world.placementError(selected, dir) || (world.stats.energy < def.cost ? `Need ⚡${def.cost}. Mine crystals!` : null);
+  const err = world.placementError(selected, dir) || (world.energy < def.cost ? `Need ⚡${def.cost}. Grab power cells!` : null);
   if (err) {
     toast(err, 'bad', 2000);
     sound.play('deny');
@@ -479,6 +551,10 @@ function select(type) {
 
 function setupControls() {
   input.onKey = (code) => {
+    if (storyOpen) {
+      if (code === 'Space' || code === 'Enter' || code === 'Escape') closeStory();
+      return;
+    }
     if (code === 'KeyH') {
       toggleHelp();
       return;
@@ -497,7 +573,7 @@ function setupControls() {
     }
   };
   input.onClick = (button) => {
-    if (helpOpen || !session || session.world.phase !== 'play') return;
+    if (storyOpen || helpOpen || !session || session.world.phase !== 'play') return;
     if (button === 2) {
       selected = null;
       hud.setSelected(null);
@@ -512,6 +588,7 @@ function setupControls() {
     if (slot) select(slot.dataset.type);
   });
   $('help-close').addEventListener('click', toggleHelp);
+  $('story-go').addEventListener('click', closeStory);
   $('again-btn').addEventListener('click', () => session?.act({ k: 'restart' }));
   $('menu-btn').addEventListener('click', leaveSession);
 }
@@ -524,37 +601,68 @@ function toggleHelp() {
 
 function showVictory(lost = false) {
   const w = session.world;
-  const time = w.wonAt - w.playStart;
+  const time = w.endedAt - w.playStart;
   const c = w.counters;
   if (lost) {
-    $('victory-eyebrow').textContent = 'The colony ship turned back';
-    $('victory-title').textContent = `The planet reached ${Math.round(w.stats.bio)}%. Not enough.`;
-    $('medal').textContent = '🪐';
-    $('again-btn').textContent = 'Try another planet';
+    $('victory-eyebrow').textContent = 'Transmission lost';
+    $('victory-title').textContent = `The reactor fell on wave ${w.wave}. Ares is gone.`;
+    $('medal').textContent = '💀';
+    $('again-btn').textContent = 'Try again';
   } else {
-    const [medal, title] = time < 480 ? ['🥇', 'Gold'] : time < 720 ? ['🥈', 'Silver'] : ['🥉', 'Bronze'];
-    $('victory-eyebrow').textContent = 'Planet stabilized';
-    $('victory-title').textContent = `It breathes. ${title} terraformers.`;
-    $('medal').textContent = medal;
-    $('again-btn').textContent = 'Terraform a new planet';
+    $('victory-eyebrow').textContent = 'Evacuation beacon charged';
+    $('victory-title').textContent = 'The ark ships are coming. Humanity survives.';
+    const reactor = w.reactor.hp / w.reactor.max;
+    $('medal').textContent = reactor > 0.7 ? '🥇' : reactor > 0.35 ? '🥈' : '🥉';
+    $('again-btn').textContent = 'Defend again';
   }
   $('victory-stats').innerHTML = [
     [formatTime(time), 'Time'],
-    [c.built, 'Built'],
-    [c.shot + (c.kills || 0), 'Threats destroyed'],
-    [c.ore, 'Crystals mined'],
+    [`${w.wave}/${TUNING.waves}`, 'Waves'],
+    [c.kills + c.pods, 'Xal destroyed'],
+    [c.built, 'Defences built'],
   ]
     .map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`)
     .join('');
   updateVictoryButtons();
   $('victory').classList.remove('hidden');
+  $('downed').classList.add('hidden');
   input.unlock();
 }
 
 function updateVictoryButtons() {
   if (!session) return;
   $('again-btn').disabled = !session.isHost;
-  $('victory-wait').textContent = session.isHost ? '' : 'Waiting for the host to start a new planet…';
+  $('victory-wait').textContent = session.isHost ? '' : 'Waiting for the host to restart…';
+}
+
+/** Tracks the local pilot's health: hurt feedback, the downed screen and respawning. */
+function updateVitals(world) {
+  const me = world.players.get(meId);
+  if (!me) return;
+  if (me.hp < lastHp - 0.5 && !me.dead) {
+    juice.hurt();
+    const now = performance.now();
+    if (now - hurtSoundAt > 350) {
+      hurtSoundAt = now;
+      sound.play('hurt');
+    }
+  }
+  lastHp = me.hp;
+  if (me.dead && !wasDead) {
+    wasDead = true;
+    selected = null;
+    hud.setSelected(null);
+    sound.play('down');
+    $('downed').classList.remove('hidden');
+  }
+  if (me.dead) {
+    $('downed-timer').textContent = `Respawning at the reactor in ${Math.max(0, Math.ceil(me.respawnAt - world.simTime))}…`;
+  } else if (wasDead) {
+    wasDead = false;
+    $('downed').classList.add('hidden');
+    player.spawn(world);
+    toast('Back in the fight. Protect the reactor!');
+  }
 }
 
 function updateGameplay(dt, world) {
@@ -565,6 +673,8 @@ function updateGameplay(dt, world) {
     prompt.textContent = '';
     return;
   }
+  updateVitals(world);
+  const dead = isDead();
 
   // Share our pose, faster in small rooms, and only when it changes (keeps realtime costs low).
   poseTimer -= dt;
@@ -580,39 +690,36 @@ function updateGameplay(dt, world) {
     }
   }
 
-  // Walk into crystals to mine them.
+  // Walk into power cells to collect them.
   const here = player.dir.toArray();
   const now = performance.now();
-  for (const [id, at] of pendingOre) if (now - at > 2500) pendingOre.delete(id);
-  if (player.heightAboveTerrain() < 3) {
-    for (const ore of world.ores.values()) {
-      if (pendingOre.has(ore.id)) continue;
-      if (dist(ore.dir, here) * R < 2.1) {
-        pendingOre.set(ore.id, now);
-        session.act({ k: 'collect', id: ore.id });
+  for (const [id, at] of pendingCells) if (now - at > 2500) pendingCells.delete(id);
+  if (!dead && player.heightAboveTerrain() < 3) {
+    for (const cell of world.cells.values()) {
+      if (pendingCells.has(cell.id)) continue;
+      if (dist(cell.dir, here) * R < 2.1) {
+        pendingCells.set(cell.id, now);
+        session.act({ k: 'collect', id: cell.id });
       }
     }
   }
 
   let text = '';
-  if (selected) {
+  if (selected && !dead) {
     const dir = player.buildDir();
     const def = STRUCTURES[selected];
-    const err = world.placementError(selected, dir) || (world.stats.energy < def.cost ? `Need ⚡${def.cost}` : null);
+    const err = world.placementError(selected, dir) || (world.energy < def.cost ? `Need ⚡${def.cost}` : null);
     renderer.setGhost(selected, dir, !err, world);
     text = err ? `✕ ${err}` : `Click to build ${def.name} (⚡${def.cost}) · Right-click to cancel`;
   } else {
     renderer.setGhost(null);
-    const st = nearestStructure(world);
-    if (st) {
-      const refund = st.type === 'seed' ? 0 : Math.floor(STRUCTURES[st.type].cost / 2);
-      text = `[X] Salvage ${STRUCTURES[st.type].name}${refund ? ` (+${refund}⚡)` : ''}`;
-    }
+    const st = dead ? null : nearestStructure(world);
+    if (st) text = `[X] Salvage ${STRUCTURES[st.type].name} (+${Math.floor(STRUCTURES[st.type].cost / 2)}⚡)`;
   }
-  if (!input.active && !helpOpen) text = 'Click to take control';
-  else if (input.dragMode && !text) text = 'Right-drag to look · Left-click to act';
-  prompt.textContent = text;
-  $('crosshair').classList.toggle('lock', !selected && !!findTarget(world));
+  if (!dead && !input.active && !helpOpen && !storyOpen) text = 'Click to take control';
+  else if (!dead && input.dragMode && !text) text = 'Right-drag to look · Left-click to act';
+  prompt.textContent = dead ? '' : text;
+  $('crosshair').classList.toggle('lock', !selected && !dead && !!findTarget(world));
 
   const fuel = $('fuel');
   fuel.firstElementChild.style.height = `${player.fuel * 100}%`;
@@ -635,7 +742,8 @@ function frame(now) {
 
   let world = demo;
   if (session) {
-    session.localDir = screen === 'game' ? player.dir.toArray() : null;
+    const dead = isDead();
+    session.localDir = screen === 'game' && !dead ? player.dir.toArray() : null;
     session.update(dt);
     world = session.world;
     if (world.phase !== lastPhase) {
@@ -654,7 +762,8 @@ function frame(now) {
   let focus = null;
   let headlampPos = null;
   if (screen === 'game' && session) {
-    const canMove = !helpOpen && world.phase === 'play';
+    const dead = isDead();
+    const canMove = !helpOpen && !storyOpen && !dead && world.phase === 'play';
     player.update(dt, input, world, canMove);
     player.updateCamera(renderer.camera, world);
     updateGameplay(dt, world);
@@ -673,33 +782,44 @@ function frame(now) {
     }
     focus = player.dir;
     headlampPos = player.position().addScaledVector(player.dir, 5).addScaledVector(player.fwd, 2);
-    players.push({ id: meId, name: profile.name, color: profile.color, pose: player.pose(), isLocal: true });
+    players.push({ id: meId, name: profile.name, color: profile.color, pose: player.pose(), isLocal: true, dead });
     for (const m of session.members) {
-      if (m.id !== meId) players.push({ id: m.id, name: m.name, color: m.color, pose: session.remotes.get(m.id) });
+      if (m.id !== meId) {
+        players.push({ id: m.id, name: m.name, color: m.color, pose: session.remotes.get(m.id), dead: !!world.players.get(m.id)?.dead });
+      }
     }
     hudTimer -= dt;
     if (hudTimer <= 0) {
       hudTimer = 0.1;
-      hud.update(world, 0.1);
+      hud.update(world, meId);
+    }
+    playersTimer -= dt;
+    if (playersTimer <= 0) {
+      playersTimer = 0.5;
+      renderPlayerList($('hud-players'), session.members, session.hostId, meId, world);
     }
     moodTimer -= dt;
     if (moodTimer <= 0) {
       moodTimer = 1;
-      sound.setMood(world.stats.bio);
+      sound.setMood(world.waveActive ? 20 : 70);
     }
   } else {
     orbitAngle += dt * 0.05;
     const d = R * (screen === 'lobby' ? 2.7 : 3.05);
     const cam = renderer.camera;
-    cam.position.set(Math.sin(orbitAngle) * d, R * 0.5 + Math.sin(orbitAngle * 0.7) * R * 0.3, Math.cos(orbitAngle) * d);
-    cam.up.set(0, 1, 0);
+    // Orbit around the colony side of the planet.
+    const base = new THREE.Vector3(...world.baseDir);
+    const side = new THREE.Vector3(1, 0, 0).cross(base).normalize();
+    const around = side.clone().applyAxisAngle(base, orbitAngle);
+    cam.position.copy(base).multiplyScalar(d * 0.75).addScaledVector(around, d * 0.65);
+    cam.up.copy(base);
     if (cam.fov !== 62) {
       cam.fov = 62;
       cam.updateProjectionMatrix();
     }
-    // Shift the planet away from the UI card on the right.
     const shift = window.innerWidth > 900 ? R * (screen === 'lobby' ? 0.85 : 0.3) : 0;
-    orbitTarget.set(Math.cos(orbitAngle) * shift, 0, -Math.sin(orbitAngle) * shift);
+    const right = new THREE.Vector3().subVectors(orbitTarget.set(0, 0, 0), cam.position).cross(cam.up).normalize();
+    orbitTarget.set(0, 0, 0).addScaledVector(right, shift);
     cam.lookAt(orbitTarget);
   }
 
@@ -721,5 +841,11 @@ window.addEventListener('beforeunload', () => session?.leave());
 
 // Debug handle for local testing only (stripped from production builds).
 if (import.meta.env.DEV) {
-  window.__seedfall = { get session() { return session; }, player, renderer };
+  window.__seedfall = {
+    get session() {
+      return session;
+    },
+    player,
+    renderer,
+  };
 }
