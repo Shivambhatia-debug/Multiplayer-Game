@@ -2,7 +2,8 @@
 
 **A co-op 3D terraforming simulation for 1–6 players.** You land on a tiny planet that is frozen, toxic and dry. Your team builds machines, mines energy, plants forests and shoots down meteors until the planet can support life on its own.
 
-- Walk on a real spherical planet (Mario Galaxy style gravity), with a day/night cycle driven by a moving sun.
+- Walk a 50 m-radius planet with round-planet gravity. From the ground you see a real sky with sunrises, sunsets and stars, plus atmospheric haze, rocky terrain, grass and a day/night cycle driven by a moving sun.
+- A compass strip across the top shows your heading and marks meteors, crawlers and nearby crystals with their distance.
 - The simulation reacts: oceans rise and flood low ground, clouds form, the sky turns from toxic orange to blue, snow melts and grass spreads out from your trees.
 - Room codes and invite links, a lobby, and drop-in/drop-out play. If the host leaves, another player takes over and the game keeps going.
 - Everything is procedural: no downloaded models, textures or sound files. The audio is synthesized with WebAudio and the soundtrack brightens as the planet heals.
@@ -112,7 +113,8 @@ client/                    Netlify site
   src/main.js              app flow, input → actions, game loop
   src/sim/                 world.js (simulation + snapshots), terrain.js, defs.js (tuning), noise.js, vec.js
   src/net/                 session.js (host logic), transports.js (Ably / WS / local), api.js
-  src/render/              scene.js (planet, sky, water, clouds, bloom), models.js, fx.js
+  src/render/              scene.js (lights, water, clouds, bloom), terrainView.js (ground, rocks, grass),
+                           sky.js (sky dome + fog colours), models.js, fx.js
   src/game/                controller.js (sphere movement + camera), input.js
   src/ui/hud.js            HUD, objectives, toasts
   src/audio.js             procedural music and sound effects
