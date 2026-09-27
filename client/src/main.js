@@ -531,7 +531,8 @@ function updateGameplay(dt, world) {
       text = `[X] Salvage ${STRUCTURES[st.type].name}${refund ? ` (+${refund}⚡)` : ''}`;
     }
   }
-  if (!input.locked && !helpOpen) text = 'Click to take control';
+  if (!input.active && !helpOpen) text = 'Click to take control';
+  else if (input.dragMode && !text) text = 'Right-drag to look · Left-click to act';
   prompt.textContent = text;
   $('crosshair').classList.toggle('lock', !selected && !!findMeteorTarget(world));
 }
