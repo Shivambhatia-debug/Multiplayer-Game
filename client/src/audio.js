@@ -192,6 +192,36 @@ export class Sound {
       case 'type':
         this.tone(1200, 0.04, { type: 'square', vol: 0.03 });
         break;
+      case 'glitch':
+        for (let i = 0; i < 14; i++) {
+          this.tone(200 + Math.random() * 1800, 0.05, { type: 'square', vol: 0.05, delay: i * 0.06 });
+        }
+        this.tone(55, 1.4, { type: 'sawtooth', vol: 0.12, slide: 40 });
+        break;
+      case 'beam':
+        this.tone(80, 3.5, { type: 'sawtooth', vol: 0.12, slide: 900 });
+        this.tone(160, 3.5, { type: 'square', vol: 0.05, slide: 1800 });
+        this.noise(3, { vol: 0.12, freq: 3000 });
+        break;
+      case 'warp':
+        this.tone(1400, 2.5, { type: 'sine', vol: 0.1, slide: 60 });
+        this.tone(70, 4, { type: 'sawtooth', vol: 0.12, slide: 35, delay: 0.8 });
+        this.noise(3, { vol: 0.2, freq: 900, delay: 0.6 });
+        break;
+      case 'laser':
+        this.tone(1800, 0.25, { type: 'sawtooth', vol: 0.06 * v, slide: 300 });
+        this.noise(0.4, { vol: 0.08 * v, freq: 1500, delay: 0.15 });
+        break;
+      case 'explosion':
+        this.noise(4, { vol: 0.9, freq: 1200 });
+        this.noise(2, { vol: 0.5, freq: 4000 });
+        this.tone(45, 4, { type: 'sine', vol: 0.6, slide: 20 });
+        this.tone(90, 2.5, { type: 'sawtooth', vol: 0.15, slide: 30 });
+        break;
+      case 'engine':
+        this.noise(3, { vol: 0.25 * v, freq: 500 });
+        this.tone(60, 3, { type: 'sawtooth', vol: 0.08 * v, slide: 90 });
+        break;
       case 'win':
         [392, 494, 587, 784, 988].forEach((f, i) => this.tone(f, 1.6, { type: 'triangle', vol: 0.1, delay: i * 0.14 }));
         break;

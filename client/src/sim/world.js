@@ -214,7 +214,8 @@ export class World {
       this.waveActive = true;
       this.queue = this.waveComposition(this.wave);
       const gateCount = this.wave >= 6 ? 3 : this.wave >= 3 ? 2 : 1;
-      this.gates = Array.from({ length: gateCount }, () => offsetDir(this.baseDir, this.rand, 40, 52, R));
+      // Aliens gather outside the perimeter wall.
+      this.gates = Array.from({ length: gateCount }, () => offsetDir(this.baseDir, this.rand, 50, 58, R));
       this.spawnTimer = 0;
       events.push({ e: 'wave', n: this.wave, count: this.queue.length });
     }

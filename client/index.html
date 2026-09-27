@@ -17,6 +17,33 @@
     <canvas id="scene"></canvas>
     <div id="vignette"></div>
 
+    <!-- Splash: a click is needed before the browser lets us play sound -->
+    <section id="splash" class="splash">
+      <p class="eyebrow"><span class="pulse"></span>Incoming transmission</p>
+      <h1>Ares<span>Last colony</span></h1>
+      <button id="splash-go" class="btn primary big">▶ Click to start</button>
+      <p class="hint">Best with sound on · Desktop recommended</p>
+    </section>
+
+    <!-- Opening cinematic -->
+    <section id="intro" class="cine hidden">
+      <div class="bar-top"></div>
+      <div class="bar-bottom"></div>
+      <div id="intro-hud"></div>
+      <div id="intro-caption" class="cine-caption"><b id="intro-year"></b><p id="intro-text"></p></div>
+      <button id="intro-skip" class="btn ghost small cine-skip">Skip intro ▸</button>
+      <div class="cine-progress"><i id="intro-progress"></i></div>
+      <div id="intro-fade"></div>
+    </section>
+
+    <!-- Ending cinematic (rescue or defeat) -->
+    <section id="ending" class="cine hidden">
+      <div class="bar-top"></div>
+      <div class="bar-bottom"></div>
+      <div id="ending-caption" class="cine-caption show"><b id="ending-year"></b><p id="ending-text"></p></div>
+      <button id="ending-skip" class="btn ghost small cine-skip">Skip ▸</button>
+    </section>
+
     <!-- Title screen -->
     <section id="menu" class="screen">
       <div class="brand">
@@ -47,6 +74,10 @@
           <button id="join-btn" class="btn">Join</button>
         </div>
         <button id="solo-btn" class="btn ghost">Play solo</button>
+        <div class="join-row">
+          <button id="intro-btn" class="btn ghost small">▶ Watch intro</button>
+          <button id="quality-btn" class="btn ghost small">Graphics: High</button>
+        </div>
         <p id="menu-status" class="status" role="status"></p>
       </div>
       <footer class="menu-foot">

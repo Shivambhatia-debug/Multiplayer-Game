@@ -9,7 +9,7 @@ export const BASE_DIR = (() => {
   const l = Math.hypot(...v);
   return v.map((x) => x / l);
 })();
-const BASE_FLAT = 0.42; // radians of flattened ground around the colony (~21 m)
+const BASE_FLAT = 1.0; // radians of flattened ground around the colony (~50 m)
 const BASE_HEIGHT = 1.2;
 
 /**
@@ -48,7 +48,7 @@ export function createTerrain(seed) {
     let h = continent * 4.2 + hills * 1.6 + ridge * highland * 4.2 - 1;
     for (const c of craters) {
       const d = Math.acos(Math.min(1, dot(dir, c.dir)));
-      if (Math.acos(Math.min(1, dot(c.dir, BASE_DIR))) < BASE_FLAT * 1.6) continue;
+      if (Math.acos(Math.min(1, dot(c.dir, BASE_DIR))) < BASE_FLAT * 1.4) continue;
       if (d < c.size * 1.35) {
         const t = d / c.size;
         h += t < 1 ? -c.depth * (1 - t * t) : c.depth * 0.6 * Math.sin(((t - 1) / 0.35) * Math.PI);
@@ -56,8 +56,8 @@ export function createTerrain(seed) {
     }
     // Level a plateau for the colony, blending smoothly into the surrounding land.
     const fromBase = Math.acos(Math.min(1, dot(dir, BASE_DIR)));
-    if (fromBase < BASE_FLAT * 1.8) {
-      const t = Math.min(1, Math.max(0, (fromBase - BASE_FLAT) / (BASE_FLAT * 0.8)));
+    if (fromBase < BASE_FLAT * 1.5) {
+      const t = Math.min(1, Math.max(0, (fromBase - BASE_FLAT) / (BASE_FLAT * 0.5)));
       const k = t * t * (3 - 2 * t);
       h = BASE_HEIGHT + (h - BASE_HEIGHT) * k;
     }

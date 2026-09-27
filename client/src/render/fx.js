@@ -165,6 +165,18 @@ export class Effects {
     this.shockwave(position, color, 3, 1);
   }
 
+  /** Removes every live particle and transient effect at once. */
+  clear() {
+    this.life.fill(0);
+    this.col.fill(0);
+    this.points.geometry.attributes.color.needsUpdate = true;
+    for (const fx of this.transient) {
+      this.scene.remove(fx.obj);
+      fx.obj.material.dispose();
+    }
+    this.transient = [];
+  }
+
   update(dt) {
     for (let i = 0; i < MAX_PARTICLES; i++) {
       if (this.life[i] <= 0) continue;

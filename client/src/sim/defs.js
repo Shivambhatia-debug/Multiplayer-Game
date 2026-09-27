@@ -64,7 +64,7 @@ export const TUNING = {
   medRange: 6,
   medRate: 14,
   genRate: 0.5,
-  aggroRange: 16,
+  aggroRange: 11,
   dayLength: 180,
 };
 

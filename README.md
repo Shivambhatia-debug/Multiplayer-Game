@@ -10,10 +10,12 @@
 
 **Your mission:** keep the colony **reactor** alive through **10 waves** of the Xal while the evacuation beacon charges. If the reactor falls, humanity falls with it.
 
-- Walk the ruins of a Mars colony: habitat domes, experiment labs with flickering lights and specimen tanks, a comms tower, cargo containers, wrecked rovers and street lamps. Buildings block movement and the camera.
-- A dusty butterscotch Martian sky with blue sunsets, night stars and the moons Phobos and Deimos.
+- **Opening cinematic (~45 s, skippable):** Earth under SENTINEL's red network, the signal into deep space, the Xal portal and mothership, the attack, Earth breaking apart, and the camera arriving at Mars.
+- **A planned colony:** a reactor plaza, four paved roads with lamps, a perimeter wall with gates, and four districts: research labs with specimen tanks, habitation domes and a greenhouse, the evac landing pad with control tower and fuel tanks, and an industrial yard with containers, rovers, a solar farm and a comms tower. Outposts elsewhere lie abandoned. Buildings block movement and the camera.
+- **Human survivors:** pilots are humans in pressure suits with bubble helmets and walk cycles. Six colony scientists type at consoles, stand guard and haul crates around the plaza.
+- **The rescue:** survive all 10 waves and the evacuation ship ARK-7 lands on the pad. Scientists and pilots run up the ramp and the ship lifts off. If the reactor falls instead, it explodes.
+- **Realistic Mars:** rust dust, dark basaltic sand, bump-mapped gravel, noise-shaped boulders, floating dust, dust devils, a butterscotch sky with blue sunsets, and the moons Phobos and Deimos. Rendering uses MSAA, bloom and a cinematic grade. The Graphics toggle in the menu switches to Low for weaker GPUs.
 - Every pilot has **health**. The Xal attack pilots, buildings and the reactor. A downed pilot respawns at the reactor after 6 seconds.
-- The compass and radar show aliens, drop pods, power cells and the way home to the reactor.
 - Room codes, invite links, drop-in/drop-out play and host migration. Everything is procedural, with no downloaded models, textures or sounds.
 
 ## How to play
@@ -116,8 +118,9 @@ client/                    Netlify site
   src/main.js              app flow, input → actions, game loop
   src/net/                 session.js (host logic), transports.js (Ably / WS / local), api.js
   src/sim/                 world.js (waves, aliens, combat), ruins.js (colony layout), defs.js (units + story)
-  src/render/              scene.js (lights, reactor, aliens, turrets), terrainView.js (Mars ground, rocks),
-                           ruinsView.js (domes, labs, tanks, tower), sky.js, models.js, fx.js
+  src/render/              scene.js (lights, reactor, aliens, turrets, post-processing), intro.js (opening cinematic),
+                           terrainView.js (Mars ground, rocks), ruinsView.js (colony buildings), survivors.js
+                           (scientists + rescue ship), dust.js, materials.js, sky.js, models.js, fx.js
   src/game/                controller.js (sphere movement + camera), input.js
   src/ui/hud.js            HUD, objectives, toasts
   src/audio.js             procedural music and sound effects

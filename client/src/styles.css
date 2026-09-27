@@ -1636,3 +1636,140 @@ h1 span {
     gap: 2px;
   }
 }
+
+/* ---------- Splash & cinematics ---------- */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+  background: radial-gradient(ellipse at center, rgba(40, 12, 6, 0.75), rgba(2, 3, 8, 0.97));
+}
+
+.splash h1 {
+  margin: 0;
+}
+
+.btn.big {
+  font-size: 18px;
+  padding: 16px 30px;
+}
+
+.cine {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+}
+
+.cine > * {
+  pointer-events: auto;
+}
+
+.bar-top,
+.bar-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 11vh;
+  background: #000;
+  pointer-events: none;
+}
+
+.bar-top {
+  top: 0;
+}
+
+.bar-bottom {
+  bottom: 0;
+}
+
+.cine-caption {
+  position: absolute;
+  left: 50%;
+  bottom: calc(11vh + 28px);
+  transform: translate(-50%, 10px);
+  width: min(780px, 90vw);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+  pointer-events: none;
+}
+
+.cine-caption.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.cine-caption b {
+  display: inline-block;
+  font-family: var(--display);
+  font-size: 13px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--warn);
+  margin-bottom: 8px;
+}
+
+.cine-caption p {
+  margin: 0;
+  font-size: clamp(18px, 2.2vw, 26px);
+  line-height: 1.45;
+  color: #f1ece6;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.9);
+}
+
+#intro-hud {
+  position: absolute;
+  top: calc(11vh + 20px);
+  left: 5vw;
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  font-size: 15px;
+  color: #ff4a3a;
+  text-shadow: 0 0 12px rgba(255, 60, 40, 0.8);
+  animation: blink 0.9s steps(2) infinite;
+  pointer-events: none;
+}
+
+.cine-skip {
+  position: absolute;
+  top: calc(11vh + 14px);
+  right: 4vw;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.cine-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 11vh;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.cine-progress i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--warn);
+}
+
+#intro-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 1;
+  pointer-events: none;
+}
+
+#hud.cinematic > * {
+  display: none !important;
+}

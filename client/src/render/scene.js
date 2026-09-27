@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { PLANET_RADIUS as R } from '../sim/terrain.js';
 import { sunDir, TUNING } from '../sim/defs.js';
 import { podPos } from '../sim/world.js';
@@ -13,6 +14,7 @@ import {
   buildPod,
   buildWarning,
   buildAvatar,
+  animateHuman,
   buildAlien,
   buildReactor,
   hash01,
@@ -21,6 +23,8 @@ import { Effects } from './fx.js';
 import { SkyDome } from './sky.js';
 import { TerrainView } from './terrainView.js';
 import { RuinsView } from './ruinsView.js';
+import { Dust } from './dust.js';
+import { Survivors } from './survivors.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const tmpV = new THREE.Vector3();
@@ -65,6 +69,30 @@ function glowTexture(inner, outer) {
   return tex;
 }
 
+/** Cinematic finish: warm grade, vignette and a whisper of film grain. */
+const GRADE_SHADER = {
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uVignette: { value: 0.55 } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uVignette;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      c.rgb *= vec3(1.04, 1.0, 0.95);
+      float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+      c.rgb = mix(vec3(l), c.rgb, 1.08);
+      float d = distance(vUv, vec2(0.5));
+      c.rgb *= mix(1.0, smoothstep(0.9, 0.3, d), uVignette);
+      float n = fract(sin(dot(vUv * (uTime + 1.0), vec2(12.9898, 78.233))) * 43758.5453);
+      c.rgb += (n - 0.5) * 0.012;
+      gl_FragColor = c;
+    }`,
+};
+
 export class GameRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -86,6 +114,8 @@ export class GameRenderer {
     this.sky = new SkyDome(this.scene);
     this.terrainView = new TerrainView(this.scene);
     this.ruinsView = new RuinsView(this.scene);
+    this.dust = new Dust(this.scene);
+    this.survivors = new Survivors(this.scene);
     this.fog = new THREE.FogExp2(0x000000, 0.01);
     this.mode = null;
 
@@ -105,14 +135,41 @@ export class GameRenderer {
     this.clock = 0;
     this.night = 0;
 
-    this.composer = new EffectComposer(this.renderer);
+    // Multisampled HDR target so edges stay smooth through post-processing.
+    const target = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+    this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.7, 0.5, 1.5);
     this.composer.addPass(this.bloom);
+    this.grade = new ShaderPass(GRADE_SHADER);
+    this.composer.addPass(this.grade);
     this.composer.addPass(new OutputPass());
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /** 'high' = shadows, MSAA and full resolution; 'low' = lighter settings for weaker GPUs. */
+  setQuality(q) {
+    this.quality = q;
+    const high = q === 'high';
+    this.renderer.setPixelRatio(high ? Math.min(window.devicePixelRatio, 2) : 1);
+    this.renderer.shadowMap.enabled = high;
+    this.sun.castShadow = high;
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      rt.samples = high ? 4 : 0;
+      rt.dispose();
+    }
+    this.bloom.resolution.set(high ? 256 : 128, high ? 256 : 128);
+    for (const d of this.dust.devils) d.pts.visible = high && this.dust.visible;
+    this.dust.lowQuality = !high;
+    this.scene.traverse((o) => {
+      if (o.material) {
+        const list = Array.isArray(o.material) ? o.material : [o.material];
+        list.forEach((m) => (m.needsUpdate = true));
+      }
+    });
+    this.resize();
   }
 
   resize() {
@@ -178,7 +235,8 @@ export class GameRenderer {
       }),
     );
     this.sunSprite.material.color.setScalar(3);
-    this.sunSprite.scale.setScalar(80);
+    // The Sun looks about two-thirds its Earth size from Mars.
+    this.sunSprite.scale.setScalar(55);
     this.scene.add(this.sunSprite);
 
     // Phobos and Deimos: two small, lumpy moons.
@@ -275,6 +333,7 @@ export class GameRenderer {
     this.scene.fog = surface ? this.fog : null;
     this.sky.mesh.visible = surface;
     this.atmosphere.visible = !surface;
+    this.dust.setVisible(surface);
     const sc = this.sun.shadow.camera;
     const half = surface ? 45 : R + 10;
     sc.left = sc.bottom = -half;
@@ -488,13 +547,15 @@ export class GameRenderer {
           dir: new THREE.Vector3(...p.pose.d),
           fwd: new THREE.Vector3(...p.pose.f),
           alt: p.pose.h,
-          body: obj.getObjectByName('body'),
+          rig: obj.userData.rig,
           label: obj.getObjectByName('label'),
           walk: 0,
+          phase: Math.random() * 5,
         };
         this.avatars.set(p.id, a);
       }
-      a.label.visible = !p.isLocal;
+      a.label.visible = !p.isLocal && !a.board;
+      if (a.board) continue;
       const k = p.isLocal ? 1 : 1 - Math.exp(-14 * dt);
       const teleport = a.dir.distanceTo(tmpV.set(...p.pose.d)) > 0.2;
       a.dir.lerp(tmpV.set(...p.pose.d), teleport ? 1 : k).normalize();
@@ -506,13 +567,14 @@ export class GameRenderer {
       face(a.obj, a.dir, a.fwd);
       if (p.pose.a === 3) {
         const down = a.dir.clone().multiplyScalar(-7);
-        const nozzle = a.obj.position.clone().addScaledVector(a.dir, 0.9).addScaledVector(a.fwd, -0.5);
+        const nozzle = a.obj.position.clone().addScaledVector(a.dir, 1.2).addScaledVector(a.fwd, -0.4);
         this.fx.emit(nozzle, down, 0xff9a3a, 2, 0.35, 1.5);
         this.fx.emit(nozzle, down, 0x7cf7d4, 1, 0.25, 1);
       }
-      a.walk += dt * (p.pose.a === 1 ? 12 : 2);
-      a.body.position.y = p.pose.a === 1 ? Math.abs(Math.sin(a.walk)) * 0.12 : Math.sin(a.walk) * 0.04;
-      a.body.rotation.z = p.pose.a === 1 ? Math.sin(a.walk) * 0.06 : 0;
+      const moving = p.pose.a === 1;
+      a.walk += dt * (moving ? 9 : 1.5);
+      const state = p.pose.a >= 2 ? 'air' : moving ? 'walk' : 'idle';
+      if (!a.board) animateHuman(a.rig, state, a.walk, true);
     }
     for (const [id, a] of this.avatars) {
       if (!seen.has(id)) {
@@ -600,6 +662,45 @@ export class GameRenderer {
     }
   }
 
+  /** When the colony falls, the reactor goes up in a blue-white blast. */
+  updateReactorFate(world) {
+    const blown = world.phase === 'lost';
+    if (blown && !this.reactorBlown && this.reactor) {
+      const p = this.reactor.obj.position.clone().addScaledVector(this.reactor.obj.position.clone().normalize(), 3);
+      this.fx.burst(p, 0x9fe8ff, 400, 22, 2);
+      this.fx.burst(p, 0xffffff, 200, 14, 1.4);
+      this.fx.burst(p, 0xff8a3a, 200, 10, 2.2);
+      this.fx.shockwave(p, 0x9fe8ff, 30, 1.6);
+      this.fx.shockwave(p, 0xffffff, 18, 1);
+      this.shake = 2.5;
+      this.reactor.core.visible = false;
+      this.reactor.rings.forEach((r) => (r.visible = false));
+    }
+    if (!blown && this.reactorBlown && this.reactor) {
+      this.reactor.core.visible = true;
+      this.reactor.rings.forEach((r) => (r.visible = true));
+    }
+    this.reactorBlown = blown;
+  }
+
+  /** Camera for the end-of-game cinematics. */
+  endingCamera(world) {
+    const t = world.simTime - world.endedAt;
+    if (world.phase === 'won') {
+      this.survivors.rescueCamera(world, this.camera, t);
+      return;
+    }
+    const up = new THREE.Vector3(...world.baseDir);
+    const helper = Math.abs(up.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const e1 = new THREE.Vector3().crossVectors(up, helper).normalize();
+    const e2 = new THREE.Vector3().crossVectors(up, e1);
+    const a = t * 0.12;
+    const ground = world.terrain.surfaceRadius(world.baseDir);
+    this.camera.position.copy(up).multiplyScalar(ground + 9 + t).addScaledVector(e1, Math.cos(a) * 26).addScaledVector(e2, Math.sin(a) * 26);
+    this.camera.up.copy(up);
+    this.camera.lookAt(up.clone().multiplyScalar(ground + 3));
+  }
+
   // ---- Event effects ----------------------------------------------------------
 
   podLanded(dir) {
@@ -653,7 +754,11 @@ export class GameRenderer {
     this.syncCells(world, this.clock);
     this.syncPods(world);
     this.syncAvatars(players, world, dt);
+    this.survivors.update(dt, this.clock, world, [...this.avatars.values()]);
     this.updateEnvironment(world, dt, focus);
+    this.dust.update(dt, this.clock, this.camera, world, focus);
+    this.grade.uniforms.uTime.value = this.clock % 100;
+    this.updateReactorFate(world);
     if (headlampPos) this.headlamp.position.copy(headlampPos);
     this.fx.update(dt);
   }

@@ -13,6 +13,8 @@ import { Input } from './game/input.js';
 import { Sound } from './audio.js';
 import { Hud, toast, renderPlayerList, formatTime } from './ui/hud.js';
 import { Juice } from './ui/juice.js';
+import { Intro } from './render/intro.js';
+import { RESCUE } from './render/survivors.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -21,6 +23,7 @@ const input = new Input(canvas);
 const sound = new Sound();
 const hud = new Hud();
 const juice = new Juice();
+const intro = new Intro(renderer.renderer, sound);
 const player = new LocalPlayer();
 const demo = World.demo();
 const raycaster = new THREE.Raycaster();
@@ -44,6 +47,7 @@ let orbitAngle = 0.6;
 let radarTimer = 0;
 let jetSoundTimer = 0;
 let storyOpen = false;
+let ending = null;
 let storySeen = false;
 let wasDead = false;
 let lastHp = TUNING.playerHp;
@@ -135,6 +139,7 @@ function setBusy(busy) {
 
 function showScreen(name) {
   screen = name;
+  $('splash').classList.toggle('hidden', name !== 'splash');
   $('menu').classList.toggle('hidden', name !== 'menu');
   $('lobby').classList.toggle('hidden', name !== 'lobby');
   $('hud').classList.toggle('hidden', name !== 'game');
@@ -194,6 +199,7 @@ async function startSession({ solo = false, creating = false, code = '' }) {
 }
 
 function leaveSession() {
+  endEnding();
   session?.leave();
   session = null;
   meId = makePlayerId();
@@ -265,10 +271,11 @@ function onPhase(phase) {
     showLobby();
   } else if (phase === 'play') {
     $('victory').classList.add('hidden');
+    endEnding();
     enterGame();
   } else if (phase === 'won' || phase === 'lost') {
     if (screen !== 'game') enterGame();
-    showVictory(phase === 'lost');
+    startEnding(phase);
   }
 }
 
@@ -285,56 +292,101 @@ function enterGame() {
 
 // ---------------------------------------------------------------- story
 
-/** The opening transmission: the story types in line by line, then the three-card briefing. */
+/** The mission briefing shown when a pilot first lands: one line of story and three cards. */
 function showStory() {
   storySeen = true;
   storyOpen = true;
   input.unlock();
-  const list = $('story-lines');
-  list.innerHTML = '';
-  $('briefing').classList.add('hidden');
-  $('story-go').textContent = 'Skip';
+  const [when, text] = STORY[STORY.length - 1];
+  $('story-lines').innerHTML = `<li class="mission"><b>${when}</b><span>${text}</span></li>`;
+  $('briefing').classList.remove('hidden');
+  $('story-go').textContent = 'Defend the colony';
   $('story').classList.remove('hidden');
-  let i = 0;
-  const next = () => {
-    if (!storyOpen) return;
-    if (i < STORY.length) {
-      const [when, text] = STORY[i];
-      const li = document.createElement('li');
-      if (i === STORY.length - 1) li.className = 'mission';
-      li.innerHTML = '<b></b><span></span>';
-      li.firstChild.textContent = when;
-      li.lastChild.textContent = text;
-      list.appendChild(li);
-      sound.play('type');
-      i++;
-      storyTimer = setTimeout(next, 1700);
-    } else {
-      $('briefing').classList.remove('hidden');
-      $('story-go').textContent = 'Defend the colony';
-    }
-  };
-  next();
+  sound.play('type');
 }
 
-let storyTimer = null;
 function closeStory() {
   if (!storyOpen) return;
-  // First press finishes the text; the second one starts the game.
-  if ($('briefing').classList.contains('hidden')) {
-    clearTimeout(storyTimer);
-    const list = $('story-lines');
-    list.innerHTML = STORY.map(
-      ([w, t], i) => `<li class="${i === STORY.length - 1 ? 'mission' : ''}"><b>${w}</b><span>${t}</span></li>`,
-    ).join('');
-    $('briefing').classList.remove('hidden');
-    $('story-go').textContent = 'Defend the colony';
-    return;
-  }
   storyOpen = false;
   $('story').classList.add('hidden');
   sound.play('ui');
   toast('Click the screen to take control. Press H for the field manual.', '', 5000);
+}
+
+// ---------------------------------------------------------------- intro & endings
+
+function startIntro() {
+  sound.unlock();
+  showScreen('intro');
+  intro.start(() => {
+    showScreen('menu');
+    sound.play('ui');
+  });
+}
+
+const ENDING_LINES = {
+  won: [
+    [0, 'ARK-7 · Evacuation', 'The beacon is charged. An evacuation ship is breaking through the dust.'],
+    [RESCUE.rampOpen, 'All survivors', 'Everyone aboard, now! Scientists first. Pilots cover the ramp!'],
+    [RESCUE.rampClose, 'ARK-7 is away', '214 survivors saved. Humanity lives on.'],
+  ],
+  lost: [
+    [0, 'Reactor critical', 'The Xal broke through. The reactor is going up.'],
+    [2.5, 'Ares Colony', 'Transmission lost. The last colony has fallen.'],
+  ],
+};
+
+function startEnding(phase) {
+  ending = { phase, shown: false, line: -1, cues: new Set() };
+  selected = null;
+  hud.setSelected(null);
+  input.unlock();
+  $('hud').classList.add('cinematic');
+  $('downed').classList.add('hidden');
+  $('ending').classList.remove('hidden');
+}
+
+function endEnding() {
+  ending = null;
+  $('hud').classList.remove('cinematic');
+  $('ending').classList.add('hidden');
+}
+
+function finishEnding() {
+  if (!ending || ending.shown) return;
+  ending.shown = true;
+  $('ending').classList.add('hidden');
+  showVictory(ending.phase === 'lost');
+}
+
+/** Runs the rescue (or defeat) cinematic: camera, captions and sounds, then the results. */
+function updateEnding(world) {
+  const t = world.simTime - world.endedAt;
+  renderer.endingCamera(world);
+  const lines = ENDING_LINES[ending.phase];
+  let idx = 0;
+  for (let i = 0; i < lines.length; i++) if (t >= lines[i][0]) idx = i;
+  if (idx !== ending.line) {
+    ending.line = idx;
+    $('ending-year').textContent = lines[idx][1];
+    $('ending-text').textContent = lines[idx][2];
+  }
+  const cue = (name, at, fn) => {
+    if (t >= at && !ending.cues.has(name)) {
+      ending.cues.add(name);
+      fn();
+    }
+  };
+  if (ending.phase === 'won') {
+    cue('arrive', 0.2, () => sound.play('engine'));
+    cue('land', RESCUE.descend - 1, () => sound.play('engine', 0.7));
+    cue('leave', RESCUE.rampClose, () => sound.play('engine'));
+    cue('cheer', RESCUE.rampClose + 3, () => sound.play('win'));
+  } else {
+    cue('boom', 0, () => sound.play('explosion'));
+  }
+  const length = ending.phase === 'won' ? RESCUE.gone + 1 : 6;
+  if (t > length) finishEnding();
 }
 
 // ---------------------------------------------------------------- gameplay
@@ -550,7 +602,37 @@ function select(type) {
 }
 
 function setupControls() {
+  window.addEventListener('keydown', (e) => {
+    if (intro.active && ['Escape', 'Space', 'Enter'].includes(e.code)) intro.skip();
+    else if (screen === 'splash' && ['Space', 'Enter'].includes(e.code)) startIntro();
+  });
+  $('splash-go').addEventListener('click', startIntro);
+  $('intro-skip').addEventListener('click', () => intro.skip());
+  $('intro-btn').addEventListener('click', startIntro);
+  const qualityBtn = $('quality-btn');
+  const applyQuality = (q) => {
+    renderer.setQuality(q);
+    qualityBtn.textContent = `Graphics: ${q === 'high' ? 'High' : 'Low'}`;
+    try {
+      localStorage.setItem('ares:quality', q);
+    } catch {
+      // storage unavailable
+    }
+  };
+  let savedQuality = 'high';
+  try {
+    savedQuality = localStorage.getItem('ares:quality') || 'high';
+  } catch {
+    // storage unavailable
+  }
+  applyQuality(savedQuality);
+  qualityBtn.addEventListener('click', () => applyQuality(renderer.quality === 'high' ? 'low' : 'high'));
+  $('ending-skip').addEventListener('click', finishEnding);
   input.onKey = (code) => {
+    if (ending) {
+      if (code === 'Escape' || code === 'Space') finishEnding();
+      return;
+    }
     if (storyOpen) {
       if (code === 'Space' || code === 'Enter' || code === 'Escape') closeStory();
       return;
@@ -609,8 +691,8 @@ function showVictory(lost = false) {
     $('medal').textContent = '💀';
     $('again-btn').textContent = 'Try again';
   } else {
-    $('victory-eyebrow').textContent = 'Evacuation beacon charged';
-    $('victory-title').textContent = 'The ark ships are coming. Humanity survives.';
+    $('victory-eyebrow').textContent = 'Evacuation complete';
+    $('victory-title').textContent = 'ARK-7 is away. 214 survivors saved.';
     const reactor = w.reactor.hp / w.reactor.max;
     $('medal').textContent = reactor > 0.7 ? '🥇' : reactor > 0.35 ? '🥈' : '🥉';
     $('again-btn').textContent = 'Defend again';
@@ -739,6 +821,11 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  if (intro.active) {
+    intro.update(dt);
+    requestAnimationFrame(frame);
+    return;
+  }
 
   let world = demo;
   if (session) {
@@ -763,9 +850,10 @@ function frame(now) {
   let headlampPos = null;
   if (screen === 'game' && session) {
     const dead = isDead();
-    const canMove = !helpOpen && !storyOpen && !dead && world.phase === 'play';
+    const canMove = !helpOpen && !storyOpen && !dead && world.phase === 'play' && !ending;
     player.update(dt, input, world, canMove);
-    player.updateCamera(renderer.camera, world);
+    if (ending) updateEnding(world);
+    else player.updateCamera(renderer.camera, world);
     updateGameplay(dt, world);
     const cam = renderer.camera;
     const fov = 62 + (player.sprinting ? 7 : 0) + (player.jetting ? 5 : 0);
@@ -831,7 +919,7 @@ function frame(now) {
 setupMenu();
 setupLobby();
 setupControls();
-showScreen('menu');
+showScreen('splash');
 requestAnimationFrame((t) => {
   last = t;
   frame(t);
@@ -847,5 +935,6 @@ if (import.meta.env.DEV) {
     },
     player,
     renderer,
+    intro,
   };
 }
