@@ -14,6 +14,7 @@ import {
   buildMeteor,
   buildWarning,
   buildAvatar,
+  buildCrawler,
   setGridPower,
   hash01,
 } from './models.js';
@@ -137,6 +138,7 @@ export class GameRenderer {
     this.structs = new Map();
     this.ores = new Map();
     this.meteors = new Map();
+    this.creatures = new Map();
     this.avatars = new Map();
     this.ghost = null;
     this.ghostType = null;
@@ -302,7 +304,7 @@ export class GameRenderer {
       this.scene.remove(this.terrainMesh);
       this.terrainMesh.geometry.dispose();
     }
-    for (const map of [this.structs, this.ores, this.meteors]) {
+    for (const map of [this.structs, this.ores, this.meteors, this.creatures]) {
       for (const entry of map.values()) {
         this.entities.remove(entry.obj);
         if (entry.warn) this.entities.remove(entry.warn);
@@ -508,6 +510,76 @@ export class GameRenderer {
     }
   }
 
+  syncCreatures(world, dt) {
+    for (const [id, entry] of this.creatures) {
+      if (!world.creatures.has(id)) {
+        this.entities.remove(entry.obj);
+        this.creatures.delete(id);
+      }
+    }
+    const k = 1 - Math.exp(-8 * dt);
+    for (const c of world.creatures.values()) {
+      let entry = this.creatures.get(c.id);
+      if (!entry) {
+        const obj = buildCrawler(c.kind);
+        this.entities.add(obj);
+        entry = {
+          obj,
+          dir: new THREE.Vector3(...c.dir),
+          fwd: new THREE.Vector3(1, 0, 0),
+          body: obj.getObjectByName('body'),
+          core: obj.getObjectByName('core'),
+          phase: hash01(c.id) * 10,
+          flash: 0,
+          born: this.clock,
+        };
+        this.creatures.set(c.id, entry);
+        this.fx.burst(entry.dir.clone().multiplyScalar(world.terrain.surfaceRadius(c.dir) + 0.5), 0xc04bff, 30, 5, 0.8);
+      }
+      const target = tmpV.set(...c.dir);
+      const move = target.clone().sub(entry.dir);
+      if (move.lengthSq() > 1e-10) {
+        move.addScaledVector(entry.dir, -move.dot(entry.dir));
+        if (move.lengthSq() > 1e-10) entry.fwd.lerp(move.normalize(), 0.2);
+      }
+      entry.dir.lerp(target, k).normalize();
+      entry.fwd.addScaledVector(entry.dir, -entry.fwd.dot(entry.dir)).normalize();
+      const r = world.terrain.surfaceRadius([entry.dir.x, entry.dir.y, entry.dir.z]);
+      entry.obj.position.copy(entry.dir).multiplyScalar(r);
+      const right = new THREE.Vector3().crossVectors(entry.dir, entry.fwd).normalize();
+      tmpM.makeBasis(right, entry.dir, entry.fwd);
+      entry.obj.quaternion.setFromRotationMatrix(tmpM);
+      const t = this.clock + entry.phase;
+      const pop = Math.min(1, (this.clock - entry.born) / 0.4);
+      if (c.eating) {
+        entry.body.position.y = Math.abs(Math.sin(t * 14)) * 0.18;
+        entry.body.rotation.x = Math.sin(t * 14) * 0.25;
+      } else {
+        entry.body.position.y = Math.abs(Math.sin(t * 9)) * 0.12;
+        entry.body.rotation.x = 0;
+      }
+      entry.body.scale.set(pop * (1 + Math.sin(t * 9) * 0.06), pop * (1 - Math.sin(t * 9) * 0.06), pop);
+      entry.flash = Math.max(0, entry.flash - dt * 5);
+      entry.core.material.emissiveIntensity = 0.5 + entry.flash * 8;
+      if (c.eating && Math.random() < dt * 6) {
+        this.fx.burst(entry.obj.position.clone().addScaledVector(entry.dir, 0.6), 0xb04bff, 3, 3, 0.5);
+      }
+    }
+  }
+
+  flashCreature(id) {
+    const entry = this.creatures.get(id);
+    if (entry) entry.flash = 1;
+  }
+
+  creatureDeath(pos, brute) {
+    const p = new THREE.Vector3(...pos);
+    this.fx.burst(p, 0xd24bff, brute ? 140 : 70, brute ? 11 : 8, 1);
+    this.fx.burst(p, 0x7dff3a, 20, 4, 0.8);
+    this.fx.shockwave(p, 0xd24bff, brute ? 5 : 3, 0.5);
+    this.shakeFrom(p, brute ? 0.5 : 0.2);
+  }
+
   /** Remote players are smoothed toward their latest pose; the local player is exact. */
   syncAvatars(players, world, dt) {
     const seen = new Set();
@@ -543,6 +615,12 @@ export class GameRenderer {
       const right = tmpV.crossVectors(a.dir, a.fwd).normalize();
       tmpM.makeBasis(right, a.dir, a.fwd);
       a.obj.quaternion.setFromRotationMatrix(tmpM);
+      if (p.pose.a === 3) {
+        const down = a.dir.clone().multiplyScalar(-7);
+        const nozzle = a.obj.position.clone().addScaledVector(a.dir, 0.7).addScaledVector(a.fwd, -0.45);
+        this.fx.emit(nozzle, down, 0xff9a3a, 2, 0.35, 1.5);
+        this.fx.emit(nozzle, down, 0x7cf7d4, 1, 0.25, 1);
+      }
       a.walk += dt * (p.pose.a === 1 ? 12 : 2);
       a.body.position.y = p.pose.a === 1 ? Math.abs(Math.sin(a.walk)) * 0.12 : Math.sin(a.walk) * 0.04;
       a.body.rotation.z = p.pose.a === 1 ? Math.sin(a.walk) * 0.06 : 0;
@@ -657,6 +735,7 @@ export class GameRenderer {
     this.syncStructures(world, this.clock);
     this.syncOres(world, this.clock);
     this.syncMeteors(world);
+    this.syncCreatures(world, dt);
     this.syncAvatars(players, world, dt);
     this.updateEnvironment(world, dt, focus);
     if (headlampPos) this.headlamp.position.copy(headlampPos);

@@ -32,6 +32,9 @@ const geo = {
   pack: new THREE.BoxGeometry(0.46, 0.55, 0.24),
   hoverRing: new THREE.TorusGeometry(0.45, 0.04, 6, 24),
   gun: new THREE.BoxGeometry(0.12, 0.12, 0.5),
+  crawler: new THREE.IcosahedronGeometry(0.55, 0),
+  spike: new THREE.ConeGeometry(0.11, 0.55, 5),
+  eye: new THREE.SphereGeometry(0.09, 8, 6),
 };
 geo.pineTop.translate(0, 0.6, 0);
 geo.trail.translate(0, 5, 0);
@@ -69,6 +72,8 @@ export const mats = {
     depthWrite: false,
     side: THREE.DoubleSide,
   }),
+  blight: std(0x2a1238, { emissive: 0x5a1478, emissiveIntensity: 0.5, flatShading: true, roughness: 0.55 }),
+  blightGlow: std(0xff5ae0, { emissive: 0xff2fd0, emissiveIntensity: 6 }),
   visor: std(0x0b1020, { emissive: 0x4ad8ff, emissiveIntensity: 0.6, metalness: 0.9, roughness: 0.1 }),
 };
 
@@ -235,6 +240,32 @@ export function buildMeteor() {
   return g;
 }
 
+/** A blight crawler. Brutes are bigger, slower and take five hits. */
+export function buildCrawler(kind) {
+  const g = new THREE.Group();
+  const body = new THREE.Group();
+  body.name = 'body';
+  const core = mesh(geo.crawler, mats.blight.clone(), 0.55);
+  core.name = 'core';
+  core.scale.set(1, 0.8, 1.15);
+  body.add(core);
+  for (let i = 0; i < 7; i++) {
+    const s = mesh(geo.spike, mats.blight, 0.8);
+    const a = (i / 7) * Math.PI * 2;
+    s.position.set(Math.cos(a) * 0.3, 0.85 + (i % 2) * 0.1, Math.sin(a) * 0.35 - 0.1);
+    s.rotation.set(Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7);
+    body.add(s);
+  }
+  for (const x of [-0.18, 0.18]) {
+    const e = mesh(geo.eye, mats.blightGlow, 0.68, false);
+    e.position.set(x, 0.68, 0.5);
+    body.add(e);
+  }
+  g.add(body);
+  g.scale.setScalar(kind ? 2.2 : 1.35);
+  return g;
+}
+
 export function buildWarning() {
   const g = new THREE.Group();
   const ringMat = new THREE.MeshBasicMaterial({
@@ -281,7 +312,7 @@ export function buildAvatar(color, name) {
   const g = new THREE.Group();
   const col = new THREE.Color(color);
   const suit = std(col, { roughness: 0.4, metalness: 0.25 });
-  const glow = std(col, { emissive: col, emissiveIntensity: 4 });
+  const glow = std(col, { emissive: col, emissiveIntensity: 2.6 });
   const body = new THREE.Group();
   body.name = 'body';
   body.add(mesh(geo.capsule, suit, 0.95));

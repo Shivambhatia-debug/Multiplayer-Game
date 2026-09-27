@@ -11,16 +11,16 @@
 
 | Key | Action |
 | --- | --- |
-| `W A S D` | Move (`Shift` sprints, `Space` jumps) |
+| `W A S D` | Move (`Shift` sprints, `Space` jumps, hold `Space` in the air for the jetpack) |
 | Mouse | Look around (click the planet to lock the mouse) |
 | `1`–`5` | Pick a structure, then **click** (or `E`) to build it |
-| Click (nothing selected) | Shoot meteors. Aim assist locks on when the crosshair turns red |
+| Click (nothing selected) | Shoot meteors and crawlers. Aim assist locks on when the crosshair turns red |
 | Right click / `Esc` | Cancel building |
 | `X` | Salvage the nearest structure (50% refund) |
 | `Q` | Ping a spot for your team |
 | `H` / `M` | Field manual / mute |
 
-**Goal:** hold the Biosphere index at **90% or higher for 12 seconds**. It is the average of Air, Water, Heat comfort and Life. Finish in under 10 minutes for gold and under 15 for silver.
+**Goal:** hold the Biosphere index at **90% or higher for 12 seconds** before the colony ship arrives (16 minutes). The index is the average of Air, Water, Heat comfort and Life. If time runs out, the mission fails. Finish in under 8 minutes for gold and under 12 for silver.
 
 | Structure | Cost | What it does |
 | --- | --- | --- |
@@ -30,7 +30,11 @@
 | 🔥 Thermal Core | 25 | Raises Heat. Too many will cook your forests. Uses 0.3 energy/s |
 | 🌱 Seed Pod | 10 | Grows into a tree. Mature trees add oxygen and spread on their own |
 
-Meteor showers arrive every 45–75 seconds, and red rings on the ground show where each meteor will land. An impact destroys everything inside its ring, but it also brings heat and ice. Walk into the cyan crystals to mine shared energy.
+Meteor showers arrive every 35–55 seconds, and red rings on the ground show where each meteor will land. An impact destroys everything inside its ring, but it also brings heat and ice. Walk into the cyan crystals to mine shared energy.
+
+**Blight crawlers** start appearing after about 45 seconds. They walk to your nearest machine and eat it, and every living crawler poisons the air. A crawler dies in 2 shots and a brute in 5. Waves get bigger over time, and the radar in the bottom-left corner shows crawlers in purple and meteor targets in red.
+
+**Bounties** are short missions such as "Destroy 4 threats" or "Plant 5 Seed Pods". Each one has a 75-second timer and pays a large energy reward. Kill streaks, floating energy numbers and banners show your progress.
 
 ## Architecture
 

@@ -70,6 +70,26 @@ export class Effects {
     }
   }
 
+  /** Emits particles with an explicit velocity (jetpack flames, muzzle flashes). */
+  emit(position, velocity, color, count = 3, life = 0.45, spread = 1.2) {
+    const c = new THREE.Color(color).multiplyScalar(3);
+    for (let k = 0; k < count; k++) {
+      const i = this.cursor;
+      this.cursor = (this.cursor + 1) % MAX_PARTICLES;
+      this.pos.set([position.x, position.y, position.z], i * 3);
+      this.vel.set(
+        [
+          velocity.x + (Math.random() - 0.5) * spread,
+          velocity.y + (Math.random() - 0.5) * spread,
+          velocity.z + (Math.random() - 0.5) * spread,
+        ],
+        i * 3,
+      );
+      this.base.set([c.r, c.g, c.b], i * 3);
+      this.life[i] = this.maxLife[i] = life * (0.6 + Math.random() * 0.4);
+    }
+  }
+
   shockwave(position, color, radius = 6, duration = 0.8) {
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(color).multiplyScalar(2.5),

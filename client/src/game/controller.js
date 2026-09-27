@@ -3,10 +3,14 @@ import * as THREE from 'three';
 import { randomDir } from '../sim/vec.js';
 import { PLANET_RADIUS } from '../sim/terrain.js';
 
-const WALK = 6.5;
-const SPRINT = 10.5;
+const WALK = 7.5;
+const SPRINT = 12;
 const JUMP = 8;
 const GRAVITY = 21;
+const JET_THRUST = 36;
+const JET_BURN = 0.5;
+const JET_REFILL = 0.7;
+const MAX_ALT = 22;
 const CAM_DIST = 7.5;
 const tmp = new THREE.Vector3();
 const right = new THREE.Vector3();
@@ -20,6 +24,9 @@ export class LocalPlayer {
     this.grounded = true;
     this.pitch = 0.3;
     this.moving = false;
+    this.fuel = 1;
+    this.jetting = false;
+    this.sprinting = false;
     this.aim = new THREE.Vector3();
     this.camPos = new THREE.Vector3();
     this.sensitivity = 0.0024;
@@ -64,6 +71,7 @@ export class LocalPlayer {
     const { surface, ground } = this.groundRadius(world);
     const swimming = ground > surface + 0.05;
     this.moving = f !== 0 || s !== 0;
+    this.sprinting = this.moving && input.down('ShiftLeft', 'ShiftRight');
     if (this.moving) {
       right.crossVectors(this.fwd, this.dir).normalize();
       const speed = (input.down('ShiftLeft', 'ShiftRight') ? SPRINT : WALK) * (swimming ? 0.6 : 1);
@@ -73,11 +81,20 @@ export class LocalPlayer {
       this.fwd.addScaledVector(this.dir, -this.fwd.dot(this.dir)).normalize();
     }
 
-    if (allowMove && this.grounded && input.down('Space')) {
+    // Jump from the ground; keep holding Space after the jump's peak to fire the jetpack.
+    const space = allowMove && input.down('Space');
+    this.jetting = false;
+    if (space && this.grounded) {
       this.vAlt = swimming ? JUMP * 0.7 : JUMP;
       this.grounded = false;
+    } else if (space && !this.grounded && this.fuel > 0 && this.vAlt < 3) {
+      this.jetting = true;
+      this.vAlt = Math.min(7, this.vAlt + JET_THRUST * dt);
+      this.fuel = Math.max(0, this.fuel - JET_BURN * dt);
     }
+    if (this.grounded) this.fuel = Math.min(1, this.fuel + JET_REFILL * dt);
     this.vAlt -= GRAVITY * dt;
+    if (this.alt > MAX_ALT) this.vAlt = Math.min(this.vAlt, 0);
     this.alt += this.vAlt * dt;
     // Terrain under the new position may be higher or lower; keep the player on top of it.
     const next = this.groundRadius(world);
@@ -140,7 +157,7 @@ export class LocalPlayer {
       d: [r(this.dir.x), r(this.dir.y), r(this.dir.z)],
       f: [r(this.fwd.x), r(this.fwd.y), r(this.fwd.z)],
       h: Math.round(this.heightAboveTerrain() * 100) / 100,
-      a: !this.grounded ? 2 : this.moving ? 1 : 0,
+      a: this.jetting ? 3 : !this.grounded ? 2 : this.moving ? 1 : 0,
     };
   }
 }

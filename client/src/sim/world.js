@@ -43,7 +43,11 @@ export class World {
     this.nextId = 1;
     this.nextShowerAt = TUNING.firstShower;
     this.oreTimer = 0;
-    this.counters = { built: 0, shot: 0, impacts: 0, ore: 0 };
+    this.counters = { built: 0, shot: 0, kills: 0, impacts: 0, ore: 0 };
+    this.creatures = new Map();
+    this.nextSpawnAt = TUNING.firstCrawlers;
+    this.mission = null;
+    this.nextMissionAt = 3;
     this.version = 1;
     this.growthDirty = false;
     this.stats.bio = biosphere(this.stats);
@@ -100,6 +104,8 @@ export class World {
     this.phase = 'play';
     this.playStart = this.simTime;
     this.nextShowerAt = this.simTime + TUNING.firstShower;
+    this.nextSpawnAt = this.simTime + TUNING.firstCrawlers;
+    this.nextMissionAt = this.simTime + 3;
     return [{ e: 'start' }];
   }
 
@@ -136,9 +142,9 @@ export class World {
 
     const p = this.power;
     const condEff = clamp((s.heat - 33) / 15, 0, 1);
-    s.heat += (0.2 * heaters * p - 0.02 * (s.heat - 8)) * dt;
-    s.water += (0.2 * condensers * p * condEff - 0.006 * s.water * (s.heat > 75 ? 2.5 : 1) - 0.003 * treeMass) * dt;
-    s.air += (0.16 * scrubbers * p + 0.02 * treeMass - 0.006 * s.air) * dt;
+    s.heat += (0.3 * heaters * p - 0.02 * (s.heat - 8)) * dt;
+    s.water += (0.3 * condensers * p * condEff - 0.006 * s.water * (s.heat > 75 ? 2.5 : 1) - 0.003 * treeMass) * dt;
+    s.air += (0.24 * scrubbers * p + 0.02 * treeMass - 0.006 * s.air - 0.05 * this.creatures.size) * dt;
     s.heat = clamp(s.heat, 0, 100);
     s.water = clamp(s.water, 0, 100);
     s.air = clamp(s.air, 0, 100);
@@ -154,7 +160,16 @@ export class World {
       this.phase = 'won';
       this.wonAt = this.simTime;
       this.meteors.clear();
+      this.creatures.clear();
       events.push({ e: 'won' });
+      return events;
+    }
+    if (this.simTime - this.playStart >= TUNING.timeLimit) {
+      this.phase = 'lost';
+      this.wonAt = this.simTime;
+      this.meteors.clear();
+      this.creatures.clear();
+      events.push({ e: 'lost' });
       return events;
     }
 
@@ -166,7 +181,128 @@ export class World {
     }
 
     this.stepMeteors(playerCount, events);
+    this.stepCreatures(dt, playerCount, events);
+    this.stepMission(events);
     return events;
+  }
+
+  // ---- Blight crawlers: creatures that march on your base and eat it -------
+
+  spawnCreature(elapsed) {
+    const targets = [...this.structures.values()];
+    if (!targets.length) return;
+    const anchor = targets[Math.floor(this.rand() * targets.length)];
+    let dir = null;
+    for (let i = 0; i < 8 && !dir; i++) {
+      const d = offsetDir(anchor.dir, this.rand, 14, 22, R);
+      if (!this.isUnderwater(d, 0)) dir = d;
+    }
+    if (!dir) return;
+    const brute = elapsed > 150 && this.rand() < 0.22;
+    const id = this.nextId++;
+    this.creatures.set(id, {
+      id,
+      dir,
+      kind: brute ? 1 : 0,
+      hp: brute ? 5 : 2,
+      speed: brute ? 1.7 : 2.8,
+      target: null,
+      eating: false,
+    });
+  }
+
+  stepCreatures(dt, playerCount, events) {
+    const t = this.simTime;
+    const elapsed = t - this.playStart;
+    if (t >= this.nextSpawnAt && this.structures.size) {
+      const maxAlive = 2 + playerCount + Math.floor(elapsed / 150);
+      const wave = Math.min(4, 1 + Math.floor(elapsed / 180) + Math.floor(playerCount / 3));
+      let n = 0;
+      for (let i = 0; i < wave && this.creatures.size < maxAlive; i++, n++) this.spawnCreature(elapsed);
+      this.nextSpawnAt = t + Math.max(10, 22 - elapsed / 40);
+      if (n >= 3) events.push({ e: 'swarm', n });
+    }
+    for (const c of this.creatures.values()) {
+      let target = this.structures.get(c.target);
+      if (!target) {
+        // Crawlers go for machines first; the forest is only eaten once the base is gone.
+        let best = Infinity;
+        for (const st of this.structures.values()) {
+          const d = dist(st.dir, c.dir) + (st.type === 'seed' ? 10 : 0);
+          if (d < best) {
+            best = d;
+            target = st;
+          }
+        }
+        c.target = target?.id ?? null;
+      }
+      c.eating = false;
+      if (!target) continue;
+      const d = dist(c.dir, target.dir) * R;
+      if (d > 1.3) {
+        const k = Math.min(1, (c.speed * dt) / d);
+        c.dir = norm(c.dir.map((v, i) => v + (target.dir[i] - v) * k));
+      } else {
+        c.eating = true;
+        target.hp -= (c.kind ? 26 : 13) * dt;
+        this.growthDirty = true;
+        if (target.hp <= 0) {
+          this.structures.delete(target.id);
+          this.version++;
+          events.push({ e: 'eaten', type: target.type, dir: target.dir });
+        }
+      }
+    }
+  }
+
+  // ---- Missions: short bounties that keep something to chase -------------
+
+  newMission() {
+    const s = this.stats;
+    const pool = [
+      { kind: 'kill', n: 3 + Math.floor(this.rand() * 3), per: 14 },
+      { kind: 'ore', n: 4 + Math.floor(this.rand() * 3), per: 9 },
+      { kind: 'build', type: 'any', n: 3 + Math.floor(this.rand() * 2), per: 12 },
+      { kind: 'build', type: 'pylon', n: 2, per: 15 },
+    ];
+    if (s.heat >= 25 && s.air > 10) pool.push({ kind: 'build', type: 'seed', n: 4 + Math.floor(this.rand() * 3), per: 8 });
+    if (this.meteors.size || this.creatures.size > 1) pool.push(pool[0]);
+    const m = pool[Math.floor(this.rand() * pool.length)];
+    return {
+      id: this.nextId++,
+      kind: m.kind,
+      type: m.type || '',
+      n: m.n,
+      progress: 0,
+      reward: m.n * m.per,
+      expires: this.simTime + TUNING.missionTime,
+    };
+  }
+
+  stepMission(events) {
+    const t = this.simTime;
+    if (this.mission && t > this.mission.expires) {
+      events.push({ e: 'mission', ok: false });
+      this.mission = null;
+      this.nextMissionAt = t + 4;
+    }
+    if (!this.mission && t >= this.nextMissionAt) {
+      this.mission = this.newMission();
+      events.push({ e: 'newmission' });
+    }
+  }
+
+  progressMission(kind, type, events) {
+    const m = this.mission;
+    if (!m || m.kind !== kind) return;
+    if (kind === 'build' && m.type !== 'any' && m.type !== type) return;
+    m.progress++;
+    if (m.progress >= m.n) {
+      this.stats.energy = Math.min(TUNING.maxEnergy, this.stats.energy + m.reward);
+      events.push({ e: 'mission', ok: true, reward: m.reward });
+      this.mission = null;
+      this.nextMissionAt = this.simTime + 4;
+    }
   }
 
   stepTrees(dt, events) {
@@ -180,7 +316,7 @@ export class World {
       else if (s.heat > 80) t.hp -= 2.5 * dt;
       else if (s.water > 12 && s.air > 15 && s.heat >= 25 && t.growth < 1) {
         const q = Math.min(1, s.water / 40) * Math.min(1, s.air / 40) * (s.heat >= 35 && s.heat <= 72 ? 1 : 0.5);
-        t.growth = Math.min(1, t.growth + (dt / 55) * q);
+        t.growth = Math.min(1, t.growth + (dt / 35) * q);
         this.growthDirty = true;
       }
       if (t.hp <= 0) {
@@ -189,7 +325,7 @@ export class World {
         events.push({ e: 'wither', id: t.id });
         continue;
       }
-      if (canSpread && t.growth >= 1 && this.rand() < 0.018 * dt) {
+      if (canSpread && t.growth >= 1 && this.rand() < 0.03 * dt) {
         const dir = offsetDir(t.dir, this.rand, 2, 4.5, R);
         if (!this.placementError('seed', dir)) this.addStructure('seed', dir, 'planet', 0.05);
       }
@@ -210,7 +346,7 @@ export class World {
         const id = this.nextId++;
         this.meteors.set(id, { id, dir, from: offsetDir(dir, this.rand, 8, 16, R), t0: t + 2 + i * 1.4, dur: 9 });
       }
-      this.nextShowerAt = t + 45 + this.rand() * 30;
+      this.nextShowerAt = t + 35 + this.rand() * 20;
       events.push({ e: 'shower', n: count });
     }
     for (const m of [...this.meteors.values()]) {
@@ -257,7 +393,9 @@ export class World {
       s.energy -= def.cost;
       const st = this.addStructure(act.type, dir, by.id);
       this.counters.built++;
-      return [{ e: 'build', type: act.type, id: st.id, by: name, pid: by.id, dir }];
+      const events = [{ e: 'build', type: act.type, id: st.id, by: name, pid: by.id, dir }];
+      this.progressMission('build', act.type, events);
+      return events;
     }
     if (act.k === 'collect') {
       const ore = this.ores.get(act.id);
@@ -266,16 +404,33 @@ export class World {
       this.version++;
       s.energy = Math.min(TUNING.maxEnergy, s.energy + TUNING.oreValue);
       this.counters.ore++;
-      return [{ e: 'ore', by: name, dir: ore.dir, pid: by.id }];
+      const events = [{ e: 'ore', by: name, dir: ore.dir, pid: by.id }];
+      this.progressMission('ore', '', events);
+      return events;
     }
     if (act.k === 'hit') {
+      const c = this.creatures.get(act.id);
+      if (c) {
+        c.hp -= 1;
+        const pos = roundVec(c.dir.map((v) => v * (this.terrain.surfaceRadius(c.dir) + 0.6)), 2);
+        if (c.hp > 0) return [{ e: 'hurt', id: c.id, pos, pid: by.id }];
+        this.creatures.delete(c.id);
+        const bounty = c.kind ? TUNING.bruteBounty : TUNING.crawlerBounty;
+        s.energy = Math.min(TUNING.maxEnergy, s.energy + bounty);
+        this.counters.kills++;
+        const events = [{ e: 'kill', id: c.id, by: name, pid: by.id, pos, brute: c.kind, bounty }];
+        this.progressMission('kill', '', events);
+        return events;
+      }
       const m = this.meteors.get(act.id);
       if (!m || this.simTime < m.t0 || this.simTime > m.t0 + m.dur) return [];
       const pos = meteorPos(m, this.simTime, this.terrain);
       this.meteors.delete(m.id);
       s.energy = Math.min(TUNING.maxEnergy, s.energy + TUNING.meteorBounty);
       this.counters.shot++;
-      return [{ e: 'shot', id: m.id, by: name, pid: by.id, pos: roundVec(pos, 2) }];
+      const events = [{ e: 'shot', id: m.id, by: name, pid: by.id, pos: roundVec(pos, 2) }];
+      this.progressMission('kill', '', events);
+      return events;
     }
     if (act.k === 'salvage') {
       const st = this.structures.get(act.id);
@@ -323,6 +478,10 @@ export class World {
       ns: round(this.nextShowerAt, 1),
       c: this.counters,
       m: [...this.meteors.values()].map((m) => [m.id, ...roundVec(m.dir, 4), ...roundVec(m.from, 4), round(m.t0, 2), m.dur]),
+      cr: [...this.creatures.values()].map((c) => [c.id, ...roundVec(c.dir, 4), c.hp, c.kind, c.eating ? 1 : 0]),
+      ms: this.mission
+        ? [this.mission.id, this.mission.kind, this.mission.type, this.mission.n, this.mission.progress, this.mission.reward, round(this.mission.expires, 1)]
+        : null,
     };
   }
 
@@ -349,6 +508,14 @@ export class World {
     this.hold = msg.h;
     this.nextShowerAt = msg.ns;
     this.counters = msg.c;
+    this.creatures = new Map(
+      (msg.cr || []).map(([id, x, y, z, hp, kind, eating]) => [
+        id,
+        { id, dir: [x, y, z], hp, kind, eating: !!eating, speed: kind ? 1.7 : 2.8, target: null },
+      ]),
+    );
+    const ms = msg.ms;
+    this.mission = ms ? { id: ms[0], kind: ms[1], type: ms[2], n: ms[3], progress: ms[4], reward: ms[5], expires: ms[6] } : null;
     this.meteors = new Map(
       msg.m.map(([id, dx, dy, dz, fx, fy, fz, t0, dur]) => [id, { id, dir: [dx, dy, dz], from: [fx, fy, fz], t0, dur }]),
     );

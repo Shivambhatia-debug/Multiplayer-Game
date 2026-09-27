@@ -11,7 +11,8 @@ import { createTransport, lookupRoom, makeRoomCode, makePlayerId } from './net/a
 import { LocalPlayer } from './game/controller.js';
 import { Input } from './game/input.js';
 import { Sound } from './audio.js';
-import { Hud, toast, renderPlayerList, formatTime } from './ui/hud.js';
+import { Hud, toast, renderPlayerList, formatTime, missionText } from './ui/hud.js';
+import { Juice } from './ui/juice.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -19,6 +20,7 @@ const renderer = new GameRenderer(canvas);
 const input = new Input(canvas);
 const sound = new Sound();
 const hud = new Hud();
+const juice = new Juice();
 const player = new LocalPlayer();
 const demo = World.demo();
 const raycaster = new THREE.Raycaster();
@@ -39,6 +41,8 @@ let fireCooldown = 0;
 let hudTimer = 0;
 let moodTimer = 0;
 let orbitAngle = 0.6;
+let radarTimer = 0;
+let jetSoundTimer = 0;
 const pendingOre = new Map();
 
 // ---------------------------------------------------------------- profile
@@ -256,9 +260,9 @@ function onPhase(phase) {
   } else if (phase === 'play') {
     $('victory').classList.add('hidden');
     enterGame();
-  } else if (phase === 'won') {
+  } else if (phase === 'won' || phase === 'lost') {
     if (screen !== 'game') enterGame();
-    showVictory();
+    showVictory(phase === 'lost');
   }
 }
 
@@ -288,20 +292,67 @@ function handleEvents(events) {
       }
       case 'ore':
         renderer.sparkle(ev.dir, 0x8ff7ff, 0);
-        if (ev.pid === meId) sound.play('collect');
+        if (ev.pid === meId) {
+          sound.play('collect');
+          juice.float(new THREE.Vector3(...ev.dir).multiplyScalar(R + 2.5), `+${TUNING.oreValue}⚡`, '#8ff7ff');
+        }
         break;
-      case 'shot':
+      case 'shot': {
         renderer.meteorDestroyed(ev.pos);
-        sound.play('hit', proximity(new THREE.Vector3(...ev.pos).normalize().toArray()));
-        toast(`☄ ${ev.pid === meId ? 'You' : ev.by} shot down a meteor  +${TUNING.meteorBounty}⚡`);
+        const p = new THREE.Vector3(...ev.pos);
+        sound.play('hit', proximity(p.clone().normalize().toArray()));
+        juice.float(p, `+${TUNING.meteorBounty}⚡`, '#ffb14a');
+        if (ev.pid === meId) onMyKill('METEOR DOWN');
+        else toast(`☄ ${ev.by} shot down a meteor`);
+        break;
+      }
+      case 'kill': {
+        renderer.creatureDeath(ev.pos, ev.brute);
+        const p = new THREE.Vector3(...ev.pos);
+        sound.play('squish', proximity(p.clone().normalize().toArray()));
+        juice.float(p, `+${ev.bounty}⚡`, '#ff7ae8');
+        if (ev.pid === meId) onMyKill(ev.brute ? 'BRUTE DOWN' : null);
+        break;
+      }
+      case 'hurt':
+        renderer.flashCreature(ev.id);
+        if (ev.pid === meId) {
+          juice.hitmarker();
+          sound.play('squish', 0.4);
+        }
+        break;
+      case 'eaten':
+        renderer.sparkle(ev.dir, 0xb04bff);
+        toast(`👾 Crawlers devoured a ${STRUCTURES[ev.type].name}!`, 'bad');
+        if (proximity(ev.dir) > 0.6) juice.hurt();
+        break;
+      case 'swarm':
+        juice.banner('Blight swarm', '#ff5ae0', `${ev.n} crawlers are heading for your base`);
+        sound.play('swarm');
+        break;
+      case 'newmission':
+        if (session.world.mission) {
+          toast(`🎯 New bounty: ${missionText(session.world.mission)} (+${session.world.mission.reward}⚡)`, 'warn');
+          sound.play('ui');
+        }
+        break;
+      case 'mission':
+        if (ev.ok) {
+          juice.banner('Bounty complete', '#ffd166', `+${ev.reward}⚡ for the team`);
+          sound.play('bounty');
+        } else toast('Bounty expired. A new one is coming.', 'bad');
+        break;
+      case 'lost':
+        sound.play('lose');
         break;
       case 'impact':
         renderer.impact(ev.dir);
         sound.play('boom', proximity(ev.dir));
+        if (proximity(ev.dir) > 0.7) juice.hurt();
         if (ev.lost) toast(`💥 Impact! ${ev.lost} structure${ev.lost > 1 ? 's' : ''} destroyed.`, 'bad');
         break;
       case 'shower':
-        toast(`☄ Meteor shower incoming: ${ev.n} meteors. Shoot them before they land in the red rings!`, 'warn big', 6000);
+        juice.banner('Meteor shower', '#ff7a4a', `${ev.n} meteors incoming. Protect the red rings!`);
         sound.play('alarm');
         break;
       case 'deny':
@@ -326,21 +377,37 @@ function handleEvents(events) {
   }
 }
 
-function findMeteorTarget(world) {
+function onMyKill(label) {
+  const streak = juice.kill();
+  juice.hitmarker();
+  if (streak >= 2) sound.play('streak', streak);
+  const names = { 2: 'Double kill', 3: 'Triple kill', 4: 'Quad kill' };
+  if (streak >= 2) juice.banner(names[streak] || `${streak}× Rampage`, '#ffd166');
+  else if (label) juice.banner(label, '#ffb14a', '', 1200);
+}
+
+/** Aim assist: the meteor or crawler closest to the crosshair, within a small cone. */
+function findTarget(world) {
   const cam = renderer.camera.position;
   let best = null;
   let bestAngle = 0.2;
+  const consider = (id, p, cone) => {
+    const v = p.clone().sub(cam);
+    if (v.length() > 150) return;
+    const angle = v.angleTo(player.aim);
+    if (angle < Math.min(bestAngle, cone)) {
+      bestAngle = angle;
+      best = { id, p };
+    }
+  };
   for (const m of world.meteors.values()) {
     if (world.simTime < m.t0) continue;
-    const p = new THREE.Vector3(...meteorPos(m, world.simTime, world.terrain));
-    const v = p.clone().sub(cam);
-    const d = v.length();
-    if (d > 150) continue;
-    const angle = v.angleTo(player.aim);
-    if (angle < bestAngle) {
-      bestAngle = angle;
-      best = { m, p };
-    }
+    consider(m.id, new THREE.Vector3(...meteorPos(m, world.simTime, world.terrain)), 0.2);
+  }
+  for (const c of world.creatures.values()) {
+    const entry = renderer.creatures.get(c.id);
+    const p = entry ? entry.obj.position.clone().addScaledVector(entry.dir, c.kind ? 1.1 : 0.6) : null;
+    if (p) consider(c.id, p, 0.16);
   }
   return best;
 }
@@ -354,14 +421,16 @@ function fire() {
   if (fireCooldown > 0 || !session) return;
   fireCooldown = 0.22;
   const world = session.world;
-  const target = findMeteorTarget(world);
+  const target = findTarget(world);
   const from = gunPosition();
   const to = target ? target.p : renderer.camera.position.clone().addScaledVector(player.aim, 70);
   renderer.fx.beam(from, to, profile.color);
   sound.play('shoot');
   const r = (v) => Math.round(v * 100) / 100;
   session.sendShot({ o: from.toArray().map(r), e: to.toArray().map(r), c: profile.color });
-  if (target) session.act({ k: 'hit', id: target.m.id });
+  const muzzle = player.aim.clone().multiplyScalar(6);
+  renderer.fx.emit(from, muzzle, profile.color, 4, 0.2, 2);
+  if (target) session.act({ k: 'hit', id: target.id });
 }
 
 function tryBuild() {
@@ -453,17 +522,26 @@ function toggleHelp() {
   if (helpOpen) input.unlock();
 }
 
-function showVictory() {
+function showVictory(lost = false) {
   const w = session.world;
   const time = w.wonAt - w.playStart;
-  const [medal, title] = time < 600 ? ['🥇', 'Gold'] : time < 900 ? ['🥈', 'Silver'] : ['🥉', 'Bronze'];
-  $('victory-title').textContent = `It breathes. ${title} terraformers.`;
-  $('medal').textContent = medal;
   const c = w.counters;
+  if (lost) {
+    $('victory-eyebrow').textContent = 'The colony ship turned back';
+    $('victory-title').textContent = `The planet reached ${Math.round(w.stats.bio)}%. Not enough.`;
+    $('medal').textContent = '🪐';
+    $('again-btn').textContent = 'Try another planet';
+  } else {
+    const [medal, title] = time < 480 ? ['🥇', 'Gold'] : time < 720 ? ['🥈', 'Silver'] : ['🥉', 'Bronze'];
+    $('victory-eyebrow').textContent = 'Planet stabilized';
+    $('victory-title').textContent = `It breathes. ${title} terraformers.`;
+    $('medal').textContent = medal;
+    $('again-btn').textContent = 'Terraform a new planet';
+  }
   $('victory-stats').innerHTML = [
     [formatTime(time), 'Time'],
     [c.built, 'Built'],
-    [c.shot, 'Meteors shot'],
+    [c.shot + (c.kills || 0), 'Threats destroyed'],
     [c.ore, 'Crystals mined'],
   ]
     .map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`)
@@ -534,7 +612,16 @@ function updateGameplay(dt, world) {
   if (!input.active && !helpOpen) text = 'Click to take control';
   else if (input.dragMode && !text) text = 'Right-drag to look · Left-click to act';
   prompt.textContent = text;
-  $('crosshair').classList.toggle('lock', !selected && !!findMeteorTarget(world));
+  $('crosshair').classList.toggle('lock', !selected && !!findTarget(world));
+
+  const fuel = $('fuel');
+  fuel.firstElementChild.style.height = `${player.fuel * 100}%`;
+  fuel.classList.toggle('full', player.fuel >= 1);
+  jetSoundTimer -= dt;
+  if (player.jetting && jetSoundTimer <= 0) {
+    jetSoundTimer = 0.1;
+    sound.play('jet');
+  }
 }
 
 // ---------------------------------------------------------------- main loop
@@ -570,6 +657,18 @@ function frame(now) {
     player.update(dt, input, world, canMove);
     player.updateCamera(renderer.camera, world);
     updateGameplay(dt, world);
+    const cam = renderer.camera;
+    const fov = 62 + (player.sprinting ? 7 : 0) + (player.jetting ? 5 : 0);
+    if (Math.abs(cam.fov - fov) > 0.05) {
+      cam.fov += (fov - cam.fov) * Math.min(1, dt * 6);
+      cam.updateProjectionMatrix();
+    }
+    juice.update(dt, cam);
+    radarTimer -= dt;
+    if (radarTimer <= 0) {
+      radarTimer = 0.05;
+      hud.drawRadar(world, player);
+    }
     focus = player.dir;
     headlampPos = player.position().addScaledVector(player.dir, 5).addScaledVector(player.fwd, 2);
     players.push({ id: meId, name: profile.name, color: profile.color, pose: player.pose(), isLocal: true });
@@ -592,6 +691,10 @@ function frame(now) {
     const cam = renderer.camera;
     cam.position.set(Math.sin(orbitAngle) * d, 14 + Math.sin(orbitAngle * 0.7) * 8, Math.cos(orbitAngle) * d);
     cam.up.set(0, 1, 0);
+    if (cam.fov !== 62) {
+      cam.fov = 62;
+      cam.updateProjectionMatrix();
+    }
     // Shift the planet away from the UI card on the right.
     const shift = window.innerWidth > 900 ? (screen === 'lobby' ? 20 : 8) : 0;
     orbitTarget.set(Math.cos(orbitAngle) * shift, 0, -Math.sin(orbitAngle) * shift);

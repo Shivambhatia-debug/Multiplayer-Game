@@ -157,6 +157,28 @@ export class Sound {
       case 'ui':
         this.tone(900, 0.06, { type: 'triangle', vol: 0.05 * v });
         break;
+      case 'squish':
+        this.noise(0.25, { vol: 0.3 * v, freq: 1800 });
+        this.tone(320, 0.25, { type: 'square', vol: 0.06 * v, slide: 90 });
+        break;
+      case 'streak': {
+        const base = 440 * 2 ** (Math.min(volume, 8) / 12);
+        [0, 4, 7].forEach((st, i) => this.tone(base * 2 ** (st / 12), 0.16, { type: 'triangle', vol: 0.09, delay: i * 0.05 }));
+        break;
+      }
+      case 'bounty':
+        [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.3, { type: 'triangle', vol: 0.1, delay: i * 0.08 }));
+        break;
+      case 'swarm':
+        this.tone(110, 0.9, { type: 'sawtooth', vol: 0.08, slide: 55 });
+        this.tone(116, 0.9, { type: 'sawtooth', vol: 0.06, slide: 58, delay: 0.1 });
+        break;
+      case 'jet':
+        this.noise(0.12, { vol: 0.05 * v, freq: 1400 });
+        break;
+      case 'lose':
+        [392, 349, 311, 262].forEach((f, i) => this.tone(f, 0.9, { type: 'triangle', vol: 0.1, delay: i * 0.25 }));
+        break;
       case 'win':
         [392, 494, 587, 784, 988].forEach((f, i) => this.tone(f, 1.6, { type: 'triangle', vol: 0.1, delay: i * 0.14 }));
         break;

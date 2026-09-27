@@ -60,9 +60,9 @@
             <li><b>Power it.</b> Solar Pylons feed every machine. Night means less power.</li>
             <li><b>Breathe &amp; drink.</b> Scrubbers clean the air, Condensers fill the oceans.</li>
             <li><b>Seed it.</b> Trees spread on their own once conditions are right.</li>
-            <li><b>Defend it.</b> Shoot meteors before they hit your base.</li>
+            <li><b>Defend it.</b> Shoot meteors and the blight crawlers that come to eat your base.</li>
           </ol>
-          <p>Hold the biosphere above <b>90%</b> for 12 seconds to win.</p>
+          <p>Hold the biosphere above <b>90%</b> for 12 seconds before the colony ship arrives (16:00).</p>
         </div>
         <button id="launch-btn" class="btn primary">Launch mission</button>
         <p id="lobby-status" class="status"></p>
@@ -94,13 +94,26 @@
 
       <div id="hud-left">
         <div class="energy"><span class="bolt">⚡</span><b id="energy-value">0</b><small id="energy-rate"></small></div>
-        <div class="meta-row"><span>Time</span><b id="time-value">0:00</b></div>
+        <div class="meta-row"><span>Colony ETA</span><b id="time-value">0:00</b></div>
         <div class="meta-row"><span>Next shower</span><b id="shower-value">—</b></div>
         <div class="meta-row"><span>Room</span><b id="hud-room">—</b></div>
         <div id="brownout" class="brownout hidden">BROWNOUT · build pylons</div>
       </div>
 
-      <ul id="hud-players" class="hud-players"></ul>
+      <div class="hud-right">
+        <ul id="hud-players" class="hud-players"></ul>
+        <div id="mission" class="mission hidden">
+          <div class="mission-head"><span>Bounty</span><b id="mission-reward"></b></div>
+          <p id="mission-text"></p>
+          <div class="bar"><i id="mission-bar"></i></div>
+          <small id="mission-time"></small>
+        </div>
+      </div>
+      <canvas id="radar" width="300" height="300" aria-label="Radar"></canvas>
+      <div id="fuel"><i></i></div>
+      <div id="floaters"></div>
+      <div id="banner"></div>
+      <div id="combo"></div>
 
       <div id="objective"></div>
       <div id="crosshair"></div>
@@ -121,6 +134,7 @@
               <li><kbd>W A S D</kbd> Move</li>
               <li><kbd>Mouse</kbd> Look (click to lock)</li>
               <li><kbd>Shift</kbd> Sprint · <kbd>Space</kbd> Jump</li>
+              <li>Hold <kbd>Space</kbd> in the air: jetpack</li>
               <li><kbd>1</kbd>–<kbd>5</kbd> Pick a structure</li>
               <li><kbd>Click</kbd> Build / shoot meteors</li>
               <li><kbd>Right click</kbd> Cancel build</li>
@@ -137,6 +151,9 @@
               <li><b>Water</b> rises as a real ocean. Low land floods, so build high.</li>
               <li><b>Trees</b> breathe out oxygen and spread, but drown or burn when things go wrong.</li>
               <li><b>Meteors</b> wipe out everything inside their red ring, yet they bring heat and ice.</li>
+              <li><b>Blight crawlers</b> walk to your machines and eat them, and they poison the air. Two shots kill one; big brutes take five.</li>
+              <li><b>Bounties</b> pay big energy rewards. The radar (bottom left) shows crawlers in purple and meteors in red.</li>
+              <li>Stabilize the planet before the <b>colony ship</b> arrives, or the mission fails.</li>
             </ul>
           </div>
         </div>
@@ -147,7 +164,7 @@
     <!-- Victory -->
     <section id="victory" class="overlay hidden">
       <div class="card wide center">
-        <p class="eyebrow">Planet stabilized</p>
+        <p class="eyebrow" id="victory-eyebrow">Planet stabilized</p>
         <h2 id="victory-title">It breathes.</h2>
         <div id="medal" class="medal"></div>
         <div id="victory-stats" class="victory-stats"></div>
