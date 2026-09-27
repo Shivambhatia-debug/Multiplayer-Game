@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Seedfall — Terraform a tiny world together</title>
+    <title>Seedfall</title>
     <meta name="description" content="Seedfall is a co-op 3D terraforming simulation. Warm a frozen, toxic planet, grow forests and defend them from meteor showers with up to six friends." />
     <meta name="theme-color" content="#050814" />
     <meta property="og:title" content="Seedfall" />
@@ -11,7 +11,7 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <canvas id="scene"></canvas>
@@ -20,13 +20,20 @@
     <!-- Title screen -->
     <section id="menu" class="screen">
       <div class="brand">
-        <p class="eyebrow">A co-op terraforming simulation</p>
+        <p class="eyebrow"><span class="pulse"></span>Planet SF-52 · Status: uninhabitable</p>
         <h1>Seed<span>fall</span></h1>
-        <p class="tagline">One frozen, toxic planet. Up to six pilots. Make it breathe.</p>
+        <p class="tagline">A frozen, toxic world and up to six pilots. Warm it, green it, defend it, and make it breathe before the colony ship arrives.</p>
+        <ul class="chips">
+          <li>1–6 players</li>
+          <li>Real-time co-op</li>
+          <li>Living climate sim</li>
+          <li>Meteors &amp; crawlers</li>
+        </ul>
       </div>
-      <div class="card">
+      <div class="card menu-card">
+        <div class="card-head"><span>Pilot registration</span><i></i></div>
         <label class="field">
-          <span>Pilot name</span>
+          <span>Call sign</span>
           <input id="name-input" maxlength="16" autocomplete="off" placeholder="Nova" />
         </label>
         <div class="field">
@@ -34,15 +41,17 @@
           <div id="swatches" class="swatches"></div>
         </div>
         <button id="create-btn" class="btn primary">Create room</button>
+        <div class="divider"><span>or join a crew</span></div>
         <div class="join-row">
-          <input id="code-input" maxlength="5" autocomplete="off" placeholder="ROOM CODE" spellcheck="false" />
+          <input id="code-input" maxlength="5" autocomplete="off" placeholder="CODE" spellcheck="false" />
           <button id="join-btn" class="btn">Join</button>
         </div>
         <button id="solo-btn" class="btn ghost">Play solo</button>
         <p id="menu-status" class="status" role="status"></p>
       </div>
       <footer class="menu-foot">
-        <span>WASD move · Mouse look · 1–5 build · Click shoot · Q ping · H help</span>
+        <span><kbd>WASD</kbd> move</span><span><kbd>Space</kbd> jump / jetpack</span><span><kbd>1–5</kbd> build</span
+        ><span><kbd>Click</kbd> shoot</span><span><kbd>Q</kbd> ping</span><span><kbd>H</kbd> help</span>
       </footer>
     </section>
 
@@ -72,52 +81,58 @@
 
     <!-- In-game HUD -->
     <section id="hud" class="hidden">
-      <div id="hud-top">
-        <div class="bio">
-          <svg viewBox="0 0 120 120" class="bio-ring">
-            <circle cx="60" cy="60" r="52" class="track" />
-            <circle cx="60" cy="60" r="52" class="fill" id="bio-fill" />
-            <circle cx="60" cy="60" r="44" class="hold" id="hold-fill" />
-          </svg>
-          <div class="bio-text">
-            <b id="bio-value">0%</b>
-            <span>Biosphere</span>
+      <div id="compass-wrap">
+        <canvas id="compass" width="1280" height="96" aria-label="Compass"></canvas>
+        <div id="objective"></div>
+      </div>
+
+      <aside id="vitals" class="panel">
+        <div class="vitals-head">
+          <div class="bio">
+            <svg viewBox="0 0 120 120" class="bio-ring">
+              <circle cx="60" cy="60" r="52" class="track" />
+              <circle cx="60" cy="60" r="52" class="fill" id="bio-fill" />
+              <circle cx="60" cy="60" r="43" class="hold" id="hold-fill" />
+            </svg>
+            <div class="bio-text"><b id="bio-value">0%</b><span>Biosphere</span></div>
+          </div>
+          <div class="energy-block">
+            <span class="label">Shared energy</span>
+            <div class="energy"><b id="energy-value">0</b><small id="energy-rate"></small></div>
           </div>
         </div>
         <div class="stats">
-          <div class="stat" data-stat="air"><span class="lbl">Air</span><div class="bar"><i></i></div><span class="val"></span></div>
-          <div class="stat" data-stat="water"><span class="lbl">Water</span><div class="bar"><i></i></div><span class="val"></span></div>
-          <div class="stat" data-stat="heat"><span class="lbl">Heat</span><div class="bar heat"><i></i><em></em></div><span class="val"></span></div>
-          <div class="stat" data-stat="life"><span class="lbl">Life</span><div class="bar"><i></i></div><span class="val"></span></div>
+          <div class="stat" data-stat="air"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h8" /></svg>Air</span><span class="val"></span><div class="bar"><i></i></div></div>
+          <div class="stat" data-stat="water"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z" /></svg>Water</span><span class="val"></span><div class="bar"><i></i></div></div>
+          <div class="stat" data-stat="heat"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0z" /></svg>Heat</span><span class="val"></span><div class="bar heat"><i></i><em></em></div></div>
+          <div class="stat" data-stat="life"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M5 19c0-8 6-13 14-14-1 8-6 14-14 14zM5 19l7-7" /></svg>Life</span><span class="val"></span><div class="bar"><i></i></div></div>
         </div>
-      </div>
-
-      <div id="hud-left">
-        <div class="energy"><span class="bolt">⚡</span><b id="energy-value">0</b><small id="energy-rate"></small></div>
-        <div class="meta-row"><span>Colony ETA</span><b id="time-value">0:00</b></div>
-        <div class="meta-row"><span>Next shower</span><b id="shower-value">—</b></div>
-        <div class="meta-row"><span>Room</span><b id="hud-room">—</b></div>
-        <div id="brownout" class="brownout hidden">BROWNOUT · build pylons</div>
-      </div>
+        <div class="meta">
+          <div class="meta-row"><span>Colony ETA</span><b id="time-value">0:00</b></div>
+          <div class="meta-row"><span>Next shower</span><b id="shower-value">—</b></div>
+          <div class="meta-row"><span>Room</span><b id="hud-room">—</b></div>
+        </div>
+        <div id="brownout" class="brownout hidden">Brownout · build pylons</div>
+      </aside>
 
       <div class="hud-right">
-        <ul id="hud-players" class="hud-players"></ul>
-        <div id="mission" class="mission hidden">
+        <ul id="hud-players" class="hud-players panel"></ul>
+        <div id="mission" class="mission panel hidden">
           <div class="mission-head"><span>Bounty</span><b id="mission-reward"></b></div>
           <p id="mission-text"></p>
           <div class="bar"><i id="mission-bar"></i></div>
           <small id="mission-time"></small>
         </div>
       </div>
-      <canvas id="radar" width="300" height="300" aria-label="Radar"></canvas>
+
+      <canvas id="radar" width="320" height="320" aria-label="Radar"></canvas>
       <div id="fuel"><i></i></div>
       <div id="floaters"></div>
       <div id="banner"></div>
       <div id="combo"></div>
-
-      <div id="objective"></div>
-      <div id="crosshair"></div>
+      <div id="crosshair"><i></i><i></i><i></i><i></i></div>
       <div id="prompt"></div>
+      <div id="build-info" class="panel hidden"></div>
       <div id="hotbar"></div>
     </section>
 
@@ -176,7 +191,7 @@
       </div>
     </section>
 
-    <div id="loading" class="loading"><div class="spinner"></div></div>
+    <div id="loading" class="loading"><div class="spinner"></div><p>Generating planet…</p></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

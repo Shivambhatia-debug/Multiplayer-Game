@@ -51,7 +51,8 @@ export class World {
     this.version = 1;
     this.growthDirty = false;
     this.stats.bio = biosphere(this.stats);
-    for (let i = 0; i < 18; i++) this.spawnOre();
+    this.playerDirs = [];
+    for (let i = 0; i < 34; i++) this.spawnOre();
   }
 
   get waterR() {
@@ -88,9 +89,11 @@ export class World {
     return s;
   }
 
-  spawnOre() {
+  /** Spawns a crystal, usually within walking distance of a player so nobody hikes for ages. */
+  spawnOre(anchors = []) {
     for (let tries = 0; tries < 12; tries++) {
-      const dir = randomDir(this.rand);
+      const anchor = anchors.length && this.rand() < 0.75 ? anchors[Math.floor(this.rand() * anchors.length)] : null;
+      const dir = anchor ? offsetDir(anchor, this.rand, 8, 36, R) : randomDir(this.rand);
       if (this.isUnderwater(dir, 0.3)) continue;
       const id = this.nextId++;
       this.ores.set(id, { id, dir });
@@ -110,7 +113,8 @@ export class World {
   }
 
   /** Advances the authoritative simulation. Returns events for the HUD and effects. */
-  step(dt, playerCount) {
+  step(dt, playerCount, playerDirs = []) {
+    this.playerDirs = playerDirs;
     this.simTime += dt;
     if (this.phase !== 'play') return [];
     const events = [];
@@ -173,11 +177,11 @@ export class World {
       return events;
     }
 
-    const oreTarget = 14 + playerCount * 3;
+    const oreTarget = 24 + playerCount * 4;
     this.oreTimer += dt;
-    if (this.ores.size < oreTarget && this.oreTimer > 3.5) {
+    if (this.ores.size < oreTarget && this.oreTimer > 2.5) {
       this.oreTimer = 0;
-      this.spawnOre();
+      this.spawnOre(playerDirs);
     }
 
     this.stepMeteors(playerCount, events);
@@ -194,7 +198,7 @@ export class World {
     const anchor = targets[Math.floor(this.rand() * targets.length)];
     let dir = null;
     for (let i = 0; i < 8 && !dir; i++) {
-      const d = offsetDir(anchor.dir, this.rand, 14, 22, R);
+      const d = offsetDir(anchor.dir, this.rand, 18, 30, R);
       if (!this.isUnderwater(d, 0)) dir = d;
     }
     if (!dir) return;

@@ -63,7 +63,7 @@ export const mats = {
   pod: std(0xb6ff7a, { emissive: 0x7dff3a, emissiveIntensity: 3 }),
   bark: std(0x6b4a33, { roughness: 0.95 }),
   ore: std(0x8ff7ff, { emissive: 0x2fe6ff, emissiveIntensity: 3.6, roughness: 0.2, metalness: 0.3 }),
-  rock: std(0x4a2f25, { emissive: 0xff4a12, emissiveIntensity: 8, flatShading: true, roughness: 1 }),
+  rock: std(0x4a2f25, { emissive: 0xff4a12, emissiveIntensity: 8, flatShading: true, roughness: 1, fog: false }),
   trail: new THREE.MeshBasicMaterial({
     color: new THREE.Color(0xff8a3a).multiplyScalar(3),
     transparent: true,
@@ -71,6 +71,7 @@ export const mats = {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
+    fog: false,
   }),
   blight: std(0x2a1238, { emissive: 0x5a1478, emissiveIntensity: 0.5, flatShading: true, roughness: 0.55 }),
   blightGlow: std(0xff5ae0, { emissive: 0xff2fd0, emissiveIntensity: 6 }),
@@ -270,6 +271,7 @@ export function buildWarning() {
   const g = new THREE.Group();
   const ringMat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(0xff3b3b).multiplyScalar(2.5),
+    fog: false,
     transparent: true,
     opacity: 0.8,
     blending: THREE.AdditiveBlending,
@@ -313,6 +315,7 @@ export function buildAvatar(color, name) {
   const col = new THREE.Color(color);
   const suit = std(col, { roughness: 0.4, metalness: 0.25 });
   const glow = std(col, { emissive: col, emissiveIntensity: 2.6 });
+  const packGlow = std(col, { emissive: col, emissiveIntensity: 0.9 });
   const body = new THREE.Group();
   body.name = 'body';
   body.add(mesh(geo.capsule, suit, 0.95));
@@ -320,7 +323,7 @@ export function buildAvatar(color, name) {
   visor.scale.set(1, 0.65, 0.7);
   visor.position.z = 0.24;
   body.add(visor);
-  const pack = mesh(geo.pack, glow, 1.0);
+  const pack = mesh(geo.pack, packGlow, 1.0);
   pack.position.z = -0.38;
   body.add(pack);
   const gun = mesh(geo.gun, mats.darkMetal, 0.95);

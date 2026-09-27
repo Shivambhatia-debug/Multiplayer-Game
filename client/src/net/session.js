@@ -25,6 +25,8 @@ export class Session {
     this.worldAcc = 0;
     this.sentVersion = -1;
     this.growthAcc = 0;
+    /** Where the local player stands; set by the game loop so the host can spawn crystals nearby. */
+    this.localDir = null;
 
     this.onMembers = () => {};
     this.onEvents = () => {};
@@ -155,7 +157,9 @@ export class Session {
       world.simTime += dt;
       return;
     }
-    this.emitEvents(world.step(dt, Math.max(1, this.members.length)));
+    const dirs = [...this.remotes.values()].map((p) => p.d).filter(Array.isArray);
+    if (this.localDir) dirs.push(this.localDir);
+    this.emitEvents(world.step(dt, Math.max(1, this.members.length), dirs));
     if (this.solo) return;
 
     this.tickAcc += dt;

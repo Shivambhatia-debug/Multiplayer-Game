@@ -11,7 +11,7 @@ const JET_THRUST = 36;
 const JET_BURN = 0.5;
 const JET_REFILL = 0.7;
 const MAX_ALT = 22;
-const CAM_DIST = 7.5;
+const CAM_DIST = 6.2;
 const tmp = new THREE.Vector3();
 const right = new THREE.Vector3();
 
@@ -22,7 +22,7 @@ export class LocalPlayer {
     this.alt = 0;
     this.vAlt = 0;
     this.grounded = true;
-    this.pitch = 0.3;
+    this.pitch = 0.12;
     this.moving = false;
     this.fuel = 1;
     this.jetting = false;
@@ -122,7 +122,7 @@ export class LocalPlayer {
   }
 
   updateCamera(camera, world) {
-    const target = this.position(tmp).addScaledVector(this.dir, 1.6);
+    const target = this.position(tmp).addScaledVector(this.dir, 1.85);
     right.crossVectors(this.fwd, this.dir).normalize();
     target.addScaledVector(right, 0.75);
     this.aim

@@ -19,30 +19,21 @@ import {
   hash01,
 } from './models.js';
 import { Effects } from './fx.js';
+import { SkyDome } from './sky.js';
+import { TerrainView } from './terrainView.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 // Clouds hug the planet in orbit views and sit above the camera when playing.
-const CLOUD_ORBIT_R = R + 4.5;
-const CLOUD_PLAY_R = R + 13;
+const CLOUD_ORBIT_R = R + 6;
+const CLOUD_PLAY_R = R + 18;
 const tmpV = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion();
 const tmpM = new THREE.Matrix4();
 
 const C = (hex) => new THREE.Color(hex);
 const PALETTE = {
-  rockA: C(0x6e5a52),
-  rockB: C(0x8a6f5c),
-  toxicRock: C(0x7a6a3a),
-  sand: C(0xd8c08a),
-  wetSand: C(0x8f7a55),
-  grassA: C(0x4caf50),
-  grassB: C(0x2f8f4e),
-  snow: C(0xcfdce8),
-  seabed: C(0x3b4a52),
   atmoToxic: C(0xff8c3a),
   atmoClean: C(0x5aa8ff),
-  skyToxic: C(0x4a2a12),
-  skyClean: C(0x3d7fd1),
   oceanToxic: C(0x4f7a3a),
   oceanClean: C(0x1766b0),
 };
@@ -131,6 +122,10 @@ export class GameRenderer {
     this.buildLights();
     this.buildSky();
     this.buildPlanetShells();
+    this.sky = new SkyDome(this.scene);
+    this.terrainView = new TerrainView(this.scene);
+    this.fog = new THREE.FogExp2(0x000000, 0.01);
+    this.mode = null;
 
     this.fx = new Effects(this.scene);
     this.entities = new THREE.Group();
@@ -175,13 +170,16 @@ export class GameRenderer {
     sc.right = sc.top = R + 6;
     sc.near = 20;
     sc.far = 180;
-    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
     this.fill = new THREE.DirectionalLight(0x6b8cff, 0.35);
     this.scene.add(this.fill);
     this.ambient = new THREE.AmbientLight(0x4a5878, 0.55);
     this.scene.add(this.ambient);
+    // Sky light from above and bounce light from the ground, oriented to the local up.
+    this.hemi = new THREE.HemisphereLight(0x88aaff, 0x3a2a1a, 0);
+    this.scene.add(this.hemi);
     this.headlamp = new THREE.PointLight(0xffe2b8, 0, 18, 1);
     this.scene.add(this.headlamp);
   }
@@ -202,8 +200,17 @@ export class GameRenderer {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     this.stars = new THREE.Points(
       g,
-      new THREE.PointsMaterial({ size: 1.7, sizeAttenuation: false, vertexColors: true, transparent: true, depthWrite: false }),
+      new THREE.PointsMaterial({
+        size: 1.7,
+        sizeAttenuation: false,
+        vertexColors: true,
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+        blending: THREE.AdditiveBlending,
+      }),
     );
+    this.stars.renderOrder = -9;
     this.scene.add(this.stars);
 
     this.sunSprite = new THREE.Sprite(
@@ -220,17 +227,17 @@ export class GameRenderer {
 
     // A distant moon for scale and silhouette.
     const moon = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(9, 2),
-      new THREE.MeshStandardMaterial({ color: 0x8b8fa3, flatShading: true, roughness: 1 }),
+      new THREE.IcosahedronGeometry(22, 3),
+      new THREE.MeshStandardMaterial({ color: 0x9a9fb3, flatShading: true, roughness: 1, fog: false }),
     );
-    moon.position.set(-160, 70, -220);
+    moon.position.set(-420, 180, -560);
     this.scene.add(moon);
     this.moon = moon;
   }
 
   buildPlanetShells() {
     this.ocean = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 128, 96),
+      new THREE.SphereGeometry(1, 192, 128),
       new THREE.MeshPhysicalMaterial({
         color: PALETTE.oceanClean,
         roughness: 0.12,
@@ -263,7 +270,7 @@ export class GameRenderer {
       uStrength: { value: 1 },
     };
     this.atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.38, 96, 64),
+      new THREE.SphereGeometry(R * 1.25, 96, 64),
       new THREE.ShaderMaterial({
         uniforms: this.atmoUniforms,
         vertexShader: /* glsl */ `
@@ -300,10 +307,6 @@ export class GameRenderer {
   setWorld(world) {
     if (world.seed === this.seed) return;
     this.seed = world.seed;
-    if (this.terrainMesh) {
-      this.scene.remove(this.terrainMesh);
-      this.terrainMesh.geometry.dispose();
-    }
     for (const map of [this.structs, this.ores, this.meteors, this.creatures]) {
       for (const entry of map.values()) {
         this.entities.remove(entry.obj);
@@ -312,98 +315,35 @@ export class GameRenderer {
       map.clear();
     }
 
-    const geo = new THREE.IcosahedronGeometry(1, 36);
-    const pos = geo.attributes.position;
-    const v = new THREE.Vector3();
-    const dirArr = [0, 0, 0];
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i).normalize();
-      dirArr[0] = v.x;
-      dirArr[1] = v.y;
-      dirArr[2] = v.z;
-      v.multiplyScalar(world.terrain.surfaceRadius(dirArr));
-      pos.setXYZ(i, v.x, v.y, v.z);
-    }
-    geo.computeVertexNormals();
-    const faces = pos.count / 3;
-    this.faceDir = new Float32Array(faces * 3);
-    this.faceH = new Float32Array(faces);
-    this.faceJitter = new Float32Array(faces);
-    const noise = createNoise3D(world.seed + 3);
-    for (let f = 0; f < faces; f++) {
-      v.set(0, 0, 0);
-      for (let k = 0; k < 3; k++) v.add(tmpV.fromBufferAttribute(pos, f * 3 + k));
-      v.divideScalar(3);
-      this.faceH[f] = v.length() - R;
-      v.normalize();
-      this.faceDir.set([v.x, v.y, v.z], f * 3);
-      this.faceJitter[f] = noise(v.x * 6, v.y * 6, v.z * 6) * 0.5 + 0.5;
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));
-    this.terrainMesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0 }),
-    );
-    this.terrainMesh.castShadow = true;
-    this.terrainMesh.receiveShadow = true;
-    this.scene.add(this.terrainMesh);
+    this.terrainView.build(world);
+    this.terrainMesh = this.terrainView.mesh;
     this.colorTimer = 0;
     this.paintTerrain(world);
   }
 
-  /** Recolours every terrain face from the world state: rock, sand, grass, frost. */
   paintTerrain(world) {
-    const colors = this.terrainMesh.geometry.attributes.color;
-    const arr = colors.array;
-    const s = world.stats;
-    const air = s.air / 100;
-    const waterR = world.waterR;
-    const cold = Math.max(0, Math.min(1, (32 - s.heat) / 24));
-    const lifeGlobal = (s.life / 100) * 0.35;
-    const trees = [];
-    for (const st of world.structures.values()) {
-      if (st.type === 'seed' && st.growth > 0.05) trees.push(st.dir[0], st.dir[1], st.dir[2], 0.35 + st.growth);
-    }
-    const rock = new THREE.Color();
-    const grass = new THREE.Color();
-    const c = new THREE.Color();
-    const infl = (6 / R) ** 2;
-    const faces = this.faceH.length;
-    for (let f = 0; f < faces; f++) {
-      const dx = this.faceDir[f * 3];
-      const dy = this.faceDir[f * 3 + 1];
-      const dz = this.faceDir[f * 3 + 2];
-      const h = this.faceH[f];
-      const j = this.faceJitter[f];
-      let green = lifeGlobal;
-      for (let t = 0; t < trees.length; t += 4) {
-        const ex = dx - trees[t];
-        const ey = dy - trees[t + 1];
-        const ez = dz - trees[t + 2];
-        const d2 = ex * ex + ey * ey + ez * ez;
-        if (d2 < infl) green += trees[t + 3] * (1 - d2 / infl);
-      }
-      green = Math.min(1, green);
-      rock.copy(PALETTE.rockA).lerp(PALETTE.rockB, j).lerp(PALETTE.toxicRock, (1 - air) * 0.35);
-      grass.copy(PALETTE.grassA).lerp(PALETTE.grassB, j);
-      const r = R + h;
-      if (r < waterR - 0.05) {
-        c.copy(PALETTE.seabed).lerp(PALETTE.wetSand, Math.max(0, 1 - (waterR - r) / 1.5));
-      } else if (r < waterR + 0.45 && s.water > 1) {
-        c.copy(PALETTE.sand).lerp(grass, green * 0.4);
-      } else {
-        c.copy(rock).lerp(grass, green);
-        const frost = Math.min(0.9, cold * (0.2 + j * 0.45 + Math.max(0, h) * 0.18) + (h > 3.4 ? 0.35 : 0));
-        c.lerp(PALETTE.snow, frost * (1 - green * 0.6));
-      }
-      for (let k = 0; k < 3; k++) {
-        const i = (f * 3 + k) * 3;
-        arr[i] = c.r;
-        arr[i + 1] = c.g;
-        arr[i + 2] = c.b;
-      }
-    }
-    colors.needsUpdate = true;
+    this.terrainView.paint(world);
+  }
+
+  surfaceAt(dir) {
+    return this.world ? this.world.terrain.surfaceRadius(dir) : R;
+  }
+
+  /** Switches between the orbital view (menus) and standing on the surface (playing). */
+  setMode(mode) {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    const surface = mode === 'surface';
+    this.scene.fog = surface ? this.fog : null;
+    this.sky.mesh.visible = surface;
+    this.atmosphere.visible = !surface;
+    const sc = this.sun.shadow.camera;
+    const half = surface ? 42 : R + 10;
+    sc.left = sc.bottom = -half;
+    sc.right = sc.top = half;
+    sc.near = surface ? 1 : 20;
+    sc.far = surface ? 300 : 320;
+    sc.updateProjectionMatrix();
   }
 
   syncStructures(world, now) {
@@ -654,56 +594,71 @@ export class GameRenderer {
     const s = world.stats;
     const sun = sunDir(world.simTime);
     const sunV = new THREE.Vector3(...sun);
-    this.sun.position.copy(sunV).multiplyScalar(90);
-    this.sun.target.position.set(0, 0, 0);
-    this.fill.position.copy(sunV).multiplyScalar(-60);
-    this.sunSprite.position.copy(sunV).multiplyScalar(700);
-    this.atmoUniforms.uSun.value.copy(sunV);
-
     const air = s.air / 100;
+    this.setMode(focus ? 'surface' : 'orbit');
+
+    // The sun's shadow camera follows the player so shadows stay crisp on a big planet.
+    const center = focus ? tmpV.copy(focus).multiplyScalar(R) : tmpV.set(0, 0, 0);
+    this.sun.target.position.copy(center);
+    this.sun.position.copy(center).addScaledVector(sunV, 150);
+    this.fill.position.copy(sunV).multiplyScalar(-60);
+    this.sunSprite.position.copy(this.camera.position).addScaledVector(sunV, 700);
+    this.atmoUniforms.uSun.value.copy(sunV);
     this.atmoUniforms.uColor.value.copy(PALETTE.atmoToxic).lerp(PALETTE.atmoClean, air);
-    // From the surface we are inside the shell, so keep its glow subtle.
-    this.atmoUniforms.uStrength.value = focus ? 0.25 + air * 0.15 : 0.8 + air * 0.6;
+    this.atmoUniforms.uStrength.value = 0.8 + air * 0.6;
 
     const waterR = world.waterR;
     this.ocean.visible = s.water > 0.5;
     this.ocean.scale.setScalar(waterR);
     this.ocean.material.color.copy(PALETTE.oceanToxic).lerp(PALETTE.oceanClean, air);
-    // Fade clouds as the camera passes through the layer so it never sees a hard edge.
     const cloudR = focus ? CLOUD_PLAY_R : CLOUD_ORBIT_R;
     this.clouds.scale.setScalar(cloudR);
     const camGap = Math.abs(this.camera.position.length() - cloudR);
-    const fade = focus ? Math.max(0.15, Math.min(1, camGap / 3)) : 1;
-    this.clouds.material.opacity = Math.max(0, Math.min(0.7, (s.water - 18) / 55)) * fade;
-    this.clouds.rotation.y += dt * 0.012;
-    this.clouds.rotation.x += dt * 0.004;
+    const fade = focus ? Math.max(0.15, Math.min(1, camGap / 4)) : 1;
+    this.clouds.material.opacity = Math.max(0, Math.min(0.75, (s.water - 18) / 55)) * fade * (focus ? 0.55 : 1);
+    this.clouds.rotation.y += dt * 0.006;
+    this.clouds.rotation.x += dt * 0.002;
     this.moon.rotation.y += dt * 0.05;
-
     setGridPower(world.power);
 
-    // Sky colour depends on where the camera is standing: blue by day on a healthy planet.
-    let daylight = 0;
     if (focus) {
-      daylight = Math.max(0, Math.min(1, focus.dot(sunV) * 1.6 + 0.35));
-      const sky = PALETTE.skyToxic.clone().lerp(PALETTE.skyClean, air);
-      this.scene.background.setRGB(0.008, 0.012, 0.035).lerp(sky, daylight * (0.3 + air * 0.3));
-      this.headlamp.intensity = (1 - daylight) * 3;
+      this.sky.update(this.camera, focus, sunV, air);
+      const day = this.sky.daylight;
+      this.fog.color.copy(this.sky.horizon).lerp(this.sky.zenith, 0.12);
+      this.fog.density = 0.006 + (1 - air) * 0.011 + (1 - day) * 0.003;
+      this.hemi.position.copy(focus);
+      this.hemi.color.copy(this.sky.zenith).lerp(this.sky.horizon, 0.4);
+      this.hemi.groundColor.setRGB(0.22, 0.17, 0.12);
+      this.hemi.intensity = 0.3 + day * 0.65;
+      this.ambient.intensity = 0.12 + (1 - day) * 0.15;
+      this.sun.intensity = 2.3 * Math.max(0.05, day);
+      this.sun.color.copy(this.sky.uniforms.uSunTint.value);
+      this.fill.intensity = 0.12;
+      this.headlamp.intensity = (1 - day) * 4;
+      this.stars.material.opacity = Math.max(0, 1 - day * 1.3);
+      this.sunSprite.material.opacity = day > 0.01 ? 1 : 0.3;
     } else {
       this.scene.background.setRGB(0.008, 0.012, 0.035);
+      this.hemi.intensity = 0;
+      this.ambient.intensity = 0.55;
+      this.sun.intensity = 2.4;
+      this.sun.color.set(0xfff0d8);
+      this.fill.intensity = 0.35;
       this.headlamp.intensity = 0;
+      this.stars.material.opacity = 1;
+      this.sunSprite.material.opacity = 1;
     }
-    this.stars.material.opacity = 1 - daylight * 0.9;
 
     this.colorTimer -= dt;
     if (this.colorTimer <= 0) {
-      this.colorTimer = 0.7;
+      this.colorTimer = 1.2;
       this.paintTerrain(world);
     }
   }
 
   /** Event-driven effects from the host. */
   impact(dir) {
-    const p = new THREE.Vector3(...dir).multiplyScalar(R + 1);
+    const p = new THREE.Vector3(...dir).multiplyScalar(this.surfaceAt(dir) + 1);
     this.fx.burst(p, 0xff7a2a, 160, 16, 1.6);
     this.fx.burst(p, 0xffe0a0, 60, 8, 0.9);
     this.fx.shockwave(p, 0xff9a4a, TUNING.blastRadius * 1.8, 0.9);
@@ -720,7 +675,7 @@ export class GameRenderer {
 
   sparkle(dir, color, lift = 1) {
     const p = new THREE.Vector3(...dir);
-    p.multiplyScalar(R + lift + 1.5);
+    p.multiplyScalar(this.surfaceAt(dir) + lift + 1.5);
     this.fx.burst(p, color, 40, 5, 1);
   }
 
@@ -731,6 +686,7 @@ export class GameRenderer {
 
   update(dt, { world, players, focus, headlampPos }) {
     this.clock += dt;
+    this.world = world;
     this.setWorld(world);
     this.syncStructures(world, this.clock);
     this.syncOres(world, this.clock);

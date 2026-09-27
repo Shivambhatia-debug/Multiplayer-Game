@@ -37,6 +37,7 @@ export class Effects {
         vertexColors: true,
         transparent: true,
         depthWrite: false,
+      fog: false,
         blending: THREE.AdditiveBlending,
       }),
     );
@@ -96,6 +97,7 @@ export class Effects {
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      fog: false,
       side: THREE.DoubleSide,
     });
     const m = new THREE.Mesh(this.ringGeo, mat);
@@ -119,6 +121,7 @@ export class Effects {
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      fog: false,
     });
     const m = new THREE.Mesh(this.beamGeo, mat);
     const dir = to.clone().sub(from);
@@ -144,6 +147,7 @@ export class Effects {
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      fog: false,
       side: THREE.DoubleSide,
     });
     const m = new THREE.Mesh(this.pillarGeo, mat);

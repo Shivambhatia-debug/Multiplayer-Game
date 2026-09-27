@@ -294,7 +294,7 @@ function handleEvents(events) {
         renderer.sparkle(ev.dir, 0x8ff7ff, 0);
         if (ev.pid === meId) {
           sound.play('collect');
-          juice.float(new THREE.Vector3(...ev.dir).multiplyScalar(R + 2.5), `+${TUNING.oreValue}⚡`, '#8ff7ff');
+          juice.float(new THREE.Vector3(...ev.dir).multiplyScalar(session.world.terrain.surfaceRadius(ev.dir) + 2.5), `+${TUNING.oreValue}⚡`, '#8ff7ff');
         }
         break;
       case 'shot': {
@@ -635,6 +635,7 @@ function frame(now) {
 
   let world = demo;
   if (session) {
+    session.localDir = screen === 'game' ? player.dir.toArray() : null;
     session.update(dt);
     world = session.world;
     if (world.phase !== lastPhase) {
@@ -668,6 +669,7 @@ function frame(now) {
     if (radarTimer <= 0) {
       radarTimer = 0.05;
       hud.drawRadar(world, player);
+      hud.drawCompass(world, player);
     }
     focus = player.dir;
     headlampPos = player.position().addScaledVector(player.dir, 5).addScaledVector(player.fwd, 2);
@@ -687,16 +689,16 @@ function frame(now) {
     }
   } else {
     orbitAngle += dt * 0.05;
-    const d = screen === 'lobby' ? 64 : 74;
+    const d = R * (screen === 'lobby' ? 2.7 : 3.05);
     const cam = renderer.camera;
-    cam.position.set(Math.sin(orbitAngle) * d, 14 + Math.sin(orbitAngle * 0.7) * 8, Math.cos(orbitAngle) * d);
+    cam.position.set(Math.sin(orbitAngle) * d, R * 0.5 + Math.sin(orbitAngle * 0.7) * R * 0.3, Math.cos(orbitAngle) * d);
     cam.up.set(0, 1, 0);
     if (cam.fov !== 62) {
       cam.fov = 62;
       cam.updateProjectionMatrix();
     }
     // Shift the planet away from the UI card on the right.
-    const shift = window.innerWidth > 900 ? (screen === 'lobby' ? 20 : 8) : 0;
+    const shift = window.innerWidth > 900 ? R * (screen === 'lobby' ? 0.85 : 0.3) : 0;
     orbitTarget.set(Math.cos(orbitAngle) * shift, 0, -Math.sin(orbitAngle) * shift);
     cam.lookAt(orbitTarget);
   }
