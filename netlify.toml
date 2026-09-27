@@ -1,0 +1,25 @@
+# Netlify: frontend only. Set VITE_API_URL (your Vercel URL) in Site settings -> Environment variables.
+[build]
+  base = "client"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Invite links look like /?room=ABCDE, but keep any deep link on the SPA.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

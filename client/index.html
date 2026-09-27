@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Seedfall — Terraform a tiny world together</title>
+    <meta name="description" content="Seedfall is a co-op 3D terraforming simulation. Warm a frozen, toxic planet, grow forests and defend them from meteor showers with up to six friends." />
+    <meta name="theme-color" content="#050814" />
+    <meta property="og:title" content="Seedfall" />
+    <meta property="og:description" content="Co-op 3D terraforming. Bring a dead planet to life with your friends." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="vignette"></div>
+
+    <!-- Title screen -->
+    <section id="menu" class="screen">
+      <div class="brand">
+        <p class="eyebrow">A co-op terraforming simulation</p>
+        <h1>Seed<span>fall</span></h1>
+        <p class="tagline">One frozen, toxic planet. Up to six pilots. Make it breathe.</p>
+      </div>
+      <div class="card">
+        <label class="field">
+          <span>Pilot name</span>
+          <input id="name-input" maxlength="16" autocomplete="off" placeholder="Nova" />
+        </label>
+        <div class="field">
+          <span>Suit colour</span>
+          <div id="swatches" class="swatches"></div>
+        </div>
+        <button id="create-btn" class="btn primary">Create room</button>
+        <div class="join-row">
+          <input id="code-input" maxlength="5" autocomplete="off" placeholder="ROOM CODE" spellcheck="false" />
+          <button id="join-btn" class="btn">Join</button>
+        </div>
+        <button id="solo-btn" class="btn ghost">Play solo</button>
+        <p id="menu-status" class="status" role="status"></p>
+      </div>
+      <footer class="menu-foot">
+        <span>WASD move · Mouse look · 1–5 build · Click shoot · Q ping · H help</span>
+      </footer>
+    </section>
+
+    <!-- Lobby -->
+    <section id="lobby" class="screen hidden">
+      <div class="card lobby-card">
+        <p class="eyebrow">Room code</p>
+        <button id="room-code" class="room-code" title="Copy invite link">—</button>
+        <p class="hint" id="copy-hint">Click the code to copy an invite link</p>
+        <ul id="lobby-players" class="player-list"></ul>
+        <div class="lobby-brief">
+          <h3>Mission brief</h3>
+          <ol>
+            <li><b>Warm it.</b> Thermal Cores push the planet above freezing.</li>
+            <li><b>Power it.</b> Solar Pylons feed every machine. Night means less power.</li>
+            <li><b>Breathe &amp; drink.</b> Scrubbers clean the air, Condensers fill the oceans.</li>
+            <li><b>Seed it.</b> Trees spread on their own once conditions are right.</li>
+            <li><b>Defend it.</b> Shoot meteors before they hit your base.</li>
+          </ol>
+          <p>Hold the biosphere above <b>90%</b> for 12 seconds to win.</p>
+        </div>
+        <button id="launch-btn" class="btn primary">Launch mission</button>
+        <p id="lobby-status" class="status"></p>
+        <button id="leave-btn" class="btn ghost small">Leave room</button>
+      </div>
+    </section>
+
+    <!-- In-game HUD -->
+    <section id="hud" class="hidden">
+      <div id="hud-top">
+        <div class="bio">
+          <svg viewBox="0 0 120 120" class="bio-ring">
+            <circle cx="60" cy="60" r="52" class="track" />
+            <circle cx="60" cy="60" r="52" class="fill" id="bio-fill" />
+            <circle cx="60" cy="60" r="44" class="hold" id="hold-fill" />
+          </svg>
+          <div class="bio-text">
+            <b id="bio-value">0%</b>
+            <span>Biosphere</span>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat" data-stat="air"><span class="lbl">Air</span><div class="bar"><i></i></div><span class="val"></span></div>
+          <div class="stat" data-stat="water"><span class="lbl">Water</span><div class="bar"><i></i></div><span class="val"></span></div>
+          <div class="stat" data-stat="heat"><span class="lbl">Heat</span><div class="bar heat"><i></i><em></em></div><span class="val"></span></div>
+          <div class="stat" data-stat="life"><span class="lbl">Life</span><div class="bar"><i></i></div><span class="val"></span></div>
+        </div>
+      </div>
+
+      <div id="hud-left">
+        <div class="energy"><span class="bolt">⚡</span><b id="energy-value">0</b><small id="energy-rate"></small></div>
+        <div class="meta-row"><span>Time</span><b id="time-value">0:00</b></div>
+        <div class="meta-row"><span>Next shower</span><b id="shower-value">—</b></div>
+        <div class="meta-row"><span>Room</span><b id="hud-room">—</b></div>
+        <div id="brownout" class="brownout hidden">BROWNOUT · build pylons</div>
+      </div>
+
+      <ul id="hud-players" class="hud-players"></ul>
+
+      <div id="objective"></div>
+      <div id="crosshair"></div>
+      <div id="prompt"></div>
+      <div id="hotbar"></div>
+    </section>
+
+    <div id="toasts" aria-live="polite"></div>
+
+    <!-- Help -->
+    <section id="help" class="overlay hidden">
+      <div class="card wide">
+        <h2>Field manual</h2>
+        <div class="help-grid">
+          <div>
+            <h3>Controls</h3>
+            <ul class="keys">
+              <li><kbd>W A S D</kbd> Move</li>
+              <li><kbd>Mouse</kbd> Look (click to lock)</li>
+              <li><kbd>Shift</kbd> Sprint · <kbd>Space</kbd> Jump</li>
+              <li><kbd>1</kbd>–<kbd>5</kbd> Pick a structure</li>
+              <li><kbd>Click</kbd> Build / shoot meteors</li>
+              <li><kbd>Right click</kbd> Cancel build</li>
+              <li><kbd>X</kbd> Salvage nearby structure</li>
+              <li><kbd>Q</kbd> Ping a spot for your team</li>
+              <li><kbd>M</kbd> Mute · <kbd>H</kbd> Help</li>
+            </ul>
+          </div>
+          <div>
+            <h3>The simulation</h3>
+            <ul>
+              <li><b>Energy</b> is shared. Walk into cyan crystals to mine it. Pylons produce more on the day side.</li>
+              <li><b>Heat</b> must sit between 45 and 65 (≈10–28°C). Condensers stay idle while the planet is frozen.</li>
+              <li><b>Water</b> rises as a real ocean. Low land floods, so build high.</li>
+              <li><b>Trees</b> breathe out oxygen and spread, but drown or burn when things go wrong.</li>
+              <li><b>Meteors</b> wipe out everything inside their red ring, yet they bring heat and ice.</li>
+            </ul>
+          </div>
+        </div>
+        <button id="help-close" class="btn primary">Back to the planet</button>
+      </div>
+    </section>
+
+    <!-- Victory -->
+    <section id="victory" class="overlay hidden">
+      <div class="card wide center">
+        <p class="eyebrow">Planet stabilized</p>
+        <h2 id="victory-title">It breathes.</h2>
+        <div id="medal" class="medal"></div>
+        <div id="victory-stats" class="victory-stats"></div>
+        <div class="row">
+          <button id="again-btn" class="btn primary">Terraform a new planet</button>
+          <button id="menu-btn" class="btn ghost">Main menu</button>
+        </div>
+        <p id="victory-wait" class="status"></p>
+      </div>
+    </section>
+
+    <div id="loading" class="loading"><div class="spinner"></div></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
