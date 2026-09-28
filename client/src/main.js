@@ -10,6 +10,7 @@ import { LocalTransport } from './net/transports.js';
 import { createTransport, lookupRoom, makeRoomCode, makePlayerId } from './net/api.js';
 import { LocalPlayer } from './game/controller.js';
 import { Input } from './game/input.js';
+import { TouchControls } from './game/touch.js';
 import { Sound } from './audio.js';
 import { Hud, toast, renderPlayerList, formatTime } from './ui/hud.js';
 import { Juice } from './ui/juice.js';
@@ -27,6 +28,15 @@ const intro = new Intro(renderer.renderer, sound);
 const player = new LocalPlayer();
 const demo = World.demo();
 const raycaster = new THREE.Raycaster();
+
+// Phones and tablets get on-screen controls (add ?touch=1 to force them on a desktop).
+const forceTouch = new URLSearchParams(location.search).get('touch') === '1';
+const isTouch = forceTouch || ((navigator.maxTouchPoints > 0 || 'ontouchstart' in window) && matchMedia('(hover: none), (pointer: coarse)').matches);
+if (isTouch) {
+  document.body.classList.add('touch');
+  input.touchMode = true;
+}
+const TAKE_CONTROL = isTouch ? 'Left thumb moves, right thumb looks. Tap ? for the field manual.' : 'Click the screen to take control. Press H for the field manual.';
 
 const NAMES = ['Nova', 'Kepler', 'Vega', 'Lyra', 'Atlas', 'Juno', 'Echo', 'Orion', 'Sol', 'Zephyr'];
 const profile = loadProfile();
@@ -53,6 +63,7 @@ let wasDead = false;
 let lastHp = TUNING.playerHp;
 let hurtSoundAt = 0;
 let playersTimer = 0;
+let touch = null;
 const pendingCells = new Map();
 
 // ---------------------------------------------------------------- profile
@@ -145,6 +156,7 @@ function showScreen(name) {
   $('hud').classList.toggle('hidden', name !== 'game');
   input.enabled = name === 'game';
   if (name !== 'game') {
+    touch?.reset();
     input.unlock();
     renderer.setGhost(null);
   }
@@ -152,7 +164,24 @@ function showScreen(name) {
 
 // ---------------------------------------------------------------- session lifecycle
 
+/** On phones, go fullscreen and landscape when a mission starts (needs the tap's user gesture). */
+function goFullscreen() {
+  if (!isTouch || document.fullscreenElement) return;
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!req) return;
+  try {
+    const p = req.call(el, { navigationUI: 'hide' });
+    const lock = () => window.screen.orientation?.lock?.('landscape').catch(() => {});
+    if (p?.then) p.then(lock).catch(() => {});
+    else lock();
+  } catch {
+    // fullscreen not allowed here; play in the page instead
+  }
+}
+
 async function startSession({ solo = false, creating = false, code = '' }) {
+  goFullscreen();
   sound.unlock();
   sound.play('ui');
   setBusy(true);
@@ -287,7 +316,7 @@ function enterGame() {
   $('downed').classList.add('hidden');
   $('hud-room').textContent = session.solo ? 'Solo' : session.room;
   if (!storySeen) showStory();
-  else toast('Click the screen to take control. Press H for the field manual.', '', 5000);
+  else toast(TAKE_CONTROL, '', 5000);
 }
 
 // ---------------------------------------------------------------- story
@@ -310,7 +339,7 @@ function closeStory() {
   storyOpen = false;
   $('story').classList.add('hidden');
   sound.play('ui');
-  toast('Click the screen to take control. Press H for the field manual.', '', 5000);
+  toast(TAKE_CONTROL, '', 5000);
 }
 
 // ---------------------------------------------------------------- intro & endings
@@ -510,12 +539,14 @@ function onMyKill(label) {
 function findTarget(world) {
   const cam = renderer.camera.position;
   let best = null;
-  let bestAngle = 0.2;
+  // Thumbs are less precise than a mouse, so aim assist is stronger on touch screens.
+  const assist = isTouch ? 1.6 : 1;
+  let bestAngle = 0.2 * assist;
   const consider = (id, p, cone) => {
     const v = p.clone().sub(cam);
     if (v.length() > 150) return;
     const angle = v.angleTo(player.aim);
-    if (angle < Math.min(bestAngle, cone)) {
+    if (angle < Math.min(bestAngle, cone * assist)) {
       bestAngle = angle;
       best = { id, p };
     }
@@ -619,9 +650,11 @@ function setupControls() {
       // storage unavailable
     }
   };
-  let savedQuality = 'high';
+  // Phones and small laptops start on Low; the choice is remembered.
+  const weak = isTouch || (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
+  let savedQuality = weak ? 'low' : 'high';
   try {
-    savedQuality = localStorage.getItem('ares:quality') || 'high';
+    savedQuality = localStorage.getItem('ares:quality') || savedQuality;
   } catch {
     // storage unavailable
   }
@@ -670,6 +703,27 @@ function setupControls() {
     if (slot) select(slot.dataset.type);
   });
   $('help-close').addEventListener('click', toggleHelp);
+  $('help-leave').addEventListener('click', () => {
+    toggleHelp();
+    leaveSession();
+  });
+  if (isTouch) {
+    touch = new TouchControls($('hud'), input, {
+      onAction: () => {
+        if (storyOpen || helpOpen || !session || session.world.phase !== 'play') return;
+        if (selected) tryBuild();
+        else fire();
+      },
+      onPing: () => ping(),
+      onCancel: () => select(null),
+      onSalvage: () => {
+        const st = session && nearestStructure(session.world);
+        if (st) session.act({ k: 'salvage', id: st.id });
+      },
+      onHelp: () => toggleHelp(),
+      onMute: () => sound.toggleMute(),
+    });
+  }
   $('story-go').addEventListener('click', closeStory);
   $('again-btn').addEventListener('click', () => session?.act({ k: 'restart' }));
   $('menu-btn').addEventListener('click', leaveSession);
@@ -753,6 +807,7 @@ function updateGameplay(dt, world) {
   if (world.phase !== 'play') {
     renderer.setGhost(null);
     prompt.textContent = '';
+    touch?.update({ building: false, salvage: null, dead: false });
     return;
   }
   updateVitals(world);
@@ -787,21 +842,29 @@ function updateGameplay(dt, world) {
   }
 
   let text = '';
+  let salvageLabel = null;
   if (selected && !dead) {
     const dir = player.buildDir();
     const def = STRUCTURES[selected];
     const err = world.placementError(selected, dir) || (world.energy < def.cost ? `Need ⚡${def.cost}` : null);
     renderer.setGhost(selected, dir, !err, world);
-    text = err ? `✕ ${err}` : `Click to build ${def.name} (⚡${def.cost}) · Right-click to cancel`;
+    text = err ? `✕ ${err}` : isTouch ? `Tap Build for ${def.name} (⚡${def.cost})` : `Click to build ${def.name} (⚡${def.cost}) · Right-click to cancel`;
   } else {
     renderer.setGhost(null);
     const st = dead ? null : nearestStructure(world);
-    if (st) text = `[X] Salvage ${STRUCTURES[st.type].name} (+${Math.floor(STRUCTURES[st.type].cost / 2)}⚡)`;
+    if (st && !isTouch) text = `[X] Salvage ${STRUCTURES[st.type].name} (+${Math.floor(STRUCTURES[st.type].cost / 2)}⚡)`;
+    salvageLabel = st ? `Salvage +${Math.floor(STRUCTURES[st.type].cost / 2)}⚡` : null;
   }
   if (!dead && !input.active && !helpOpen && !storyOpen) text = 'Click to take control';
   else if (!dead && input.dragMode && !text) text = 'Right-drag to look · Left-click to act';
   prompt.textContent = dead ? '' : text;
-  $('crosshair').classList.toggle('lock', !selected && !dead && !!findTarget(world));
+  const target = !selected && !dead ? findTarget(world) : null;
+  $('crosshair').classList.toggle('lock', !!target);
+  if (touch) {
+    touch.update({ building: selected && !dead, salvage: salvageLabel, dead });
+    // Holding Fire keeps shooting.
+    if (touch.firing && !selected && !dead && !helpOpen && !storyOpen) fire();
+  }
 
   const fuel = $('fuel');
   fuel.firstElementChild.style.height = `${player.fuel * 100}%`;
@@ -816,6 +879,16 @@ function updateGameplay(dt, world) {
 // ---------------------------------------------------------------- main loop
 
 const orbitTarget = new THREE.Vector3();
+const menuUp = new THREE.Vector3();
+const menuHelper = new THREE.Vector3();
+const menuE1 = new THREE.Vector3();
+const menuE2 = new THREE.Vector3();
+
+/** A wider view in portrait so phones held upright still see enough of the battlefield. */
+function baseFov() {
+  const aspect = window.innerWidth / window.innerHeight;
+  return aspect < 1 ? 80 : aspect < 1.4 ? 70 : 62;
+}
 let last = performance.now();
 
 function frame(now) {
@@ -853,10 +926,10 @@ function frame(now) {
     const canMove = !helpOpen && !storyOpen && !dead && world.phase === 'play' && !ending;
     player.update(dt, input, world, canMove);
     if (ending) updateEnding(world);
-    else player.updateCamera(renderer.camera, world);
+    else player.updateCamera(renderer.camera, world, dt);
     updateGameplay(dt, world);
     const cam = renderer.camera;
-    const fov = 62 + (player.sprinting ? 7 : 0) + (player.jetting ? 5 : 0);
+    const fov = baseFov() + (player.sprinting ? 7 : 0) + (player.jetting ? 5 : 0);
     if (Math.abs(cam.fov - fov) > 0.05) {
       cam.fov += (fov - cam.fov) * Math.min(1, dt * 6);
       cam.updateProjectionMatrix();
@@ -892,23 +965,31 @@ function frame(now) {
       sound.setMood(world.waveActive ? 20 : 70);
     }
   } else {
-    orbitAngle += dt * 0.05;
-    const d = R * (screen === 'lobby' ? 2.7 : 3.05);
+    // Menus: a slow cinematic drone shot circling the colony.
+    orbitAngle += dt * 0.035;
     const cam = renderer.camera;
-    // Orbit around the colony side of the planet.
-    const base = new THREE.Vector3(...world.baseDir);
-    const side = new THREE.Vector3(1, 0, 0).cross(base).normalize();
-    const around = side.clone().applyAxisAngle(base, orbitAngle);
-    cam.position.copy(base).multiplyScalar(d * 0.75).addScaledVector(around, d * 0.65);
-    cam.up.copy(base);
-    if (cam.fov !== 62) {
-      cam.fov = 62;
+    const up = menuUp.set(...world.baseDir);
+    const helper = Math.abs(up.y) < 0.9 ? menuHelper.set(0, 1, 0) : menuHelper.set(1, 0, 0);
+    const e1 = menuE1.crossVectors(up, helper).normalize();
+    const e2 = menuE2.crossVectors(up, e1);
+    const ground = world.terrain.surfaceRadius(world.baseDir);
+    const dist = screen === 'lobby' ? 34 : 42;
+    const height = screen === 'lobby' ? 11 : 15;
+    cam.position.copy(up).multiplyScalar(ground + height).addScaledVector(e1, Math.cos(orbitAngle) * dist).addScaledVector(e2, Math.sin(orbitAngle) * dist);
+    cam.up.copy(up);
+    const fov = baseFov();
+    if (cam.fov !== fov) {
+      cam.fov = fov;
       cam.updateProjectionMatrix();
     }
-    const shift = window.innerWidth > 900 ? R * (screen === 'lobby' ? 0.85 : 0.3) : 0;
-    const right = new THREE.Vector3().subVectors(orbitTarget.set(0, 0, 0), cam.position).cross(cam.up).normalize();
-    orbitTarget.set(0, 0, 0).addScaledVector(right, shift);
+    // On wide screens the colony sits beside the menu card rather than behind it.
+    orbitTarget.copy(up).multiplyScalar(ground + 3);
+    if (window.innerWidth > 900) {
+      const right = menuE1.subVectors(orbitTarget, cam.position).cross(up).normalize();
+      orbitTarget.addScaledVector(right, screen === 'lobby' ? 14 : 9);
+    }
     cam.lookAt(orbitTarget);
+    focus = up;
   }
 
   renderer.update(dt, { world, players, focus, headlampPos });

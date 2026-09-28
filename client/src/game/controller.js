@@ -1,6 +1,7 @@
-// Third-person movement on a spherical planet. Gravity always points to the core.
+// Third-person movement on the planet's surface. Gravity always points to the core.
+// Movement accelerates and brakes smoothly, and the camera eases after the pilot.
 import * as THREE from 'three';
-import { offsetDir } from '../sim/vec.js';
+import { colonyFrame, localToDir } from '../sim/ruins.js';
 import { PLANET_RADIUS } from '../sim/terrain.js';
 
 const WALK = 7.5;
@@ -13,6 +14,7 @@ const JET_REFILL = 0.7;
 const MAX_ALT = 22;
 const CAM_DIST = 6.2;
 const tmp = new THREE.Vector3();
+const desired = new THREE.Vector3();
 const right = new THREE.Vector3();
 
 export class LocalPlayer {
@@ -32,20 +34,32 @@ export class LocalPlayer {
     this.sensitivity = 0.0024;
     this.ground = PLANET_RADIUS;
     this.surface = PLANET_RADIUS;
+    this.vel = new THREE.Vector3();
+    this.camDist = CAM_DIST;
+    this.camRadius = 0;
   }
 
-  /** Drops the pilot next to the colony reactor, facing outward toward the wasteland. */
+  /** Drops the pilot on one of the four roads next to the reactor, facing out toward the wall. */
   spawn(world) {
-    this.dir.set(...offsetDir(world.baseDir, Math.random, 11, 13, PLANET_RADIUS));
-    const base = new THREE.Vector3(...world.baseDir);
-    this.fwd.copy(this.dir).sub(base);
+    const frame = colonyFrame(world.baseDir);
+    const road = Math.floor(Math.random() * 4) * (Math.PI / 2);
+    const d = 12 + Math.random() * 2;
+    const side = (Math.random() - 0.5) * 2;
+    const x = Math.sin(road) * d + Math.cos(road) * side;
+    const z = Math.cos(road) * d - Math.sin(road) * side;
+    this.dir.set(...localToDir(frame, x, z));
+    const out = localToDir(frame, Math.sin(road) * (d + 5), Math.cos(road) * (d + 5));
+    this.fwd.set(...out).sub(this.dir);
     this.fwd.addScaledVector(this.dir, -this.fwd.dot(this.dir)).normalize();
+    this.camDist = CAM_DIST;
     this.fuel = 1;
     this.alt = 3;
     this.vAlt = 0;
+    this.vel.set(0, 0, 0);
     const g = this.groundRadius(world);
     this.ground = g.ground;
     this.surface = g.surface;
+    this.camRadius = 0;
   }
 
   /** Radius of the ground under the player. */
@@ -61,24 +75,30 @@ export class LocalPlayer {
 
     let f = 0;
     let s = 0;
-    if (allowMove) {
-      f = (input.down('KeyW', 'ArrowUp') ? 1 : 0) - (input.down('KeyS', 'ArrowDown') ? 1 : 0);
-      s = (input.down('KeyD', 'ArrowRight') ? 1 : 0) - (input.down('KeyA', 'ArrowLeft') ? 1 : 0);
-    }
+    if (allowMove) [f, s] = input.moveAxis();
+    const amount = Math.min(1, Math.hypot(f, s));
     const { ground } = this.groundRadius(world);
-    this.moving = f !== 0 || s !== 0;
-    this.sprinting = this.moving && input.down('ShiftLeft', 'ShiftRight');
-    if (this.moving) {
-      right.crossVectors(this.fwd, this.dir).normalize();
-      const speed = (input.down('ShiftLeft', 'ShiftRight') ? SPRINT : WALK);
-      tmp.copy(this.fwd).multiplyScalar(f).addScaledVector(right, s).normalize().multiplyScalar(speed * dt);
+    this.sprinting = amount > 0.1 && input.sprinting();
+    right.crossVectors(this.fwd, this.dir).normalize();
+    desired.set(0, 0, 0);
+    if (amount > 0.05) {
+      const speed = (this.sprinting ? SPRINT : WALK) * amount;
+      desired.copy(this.fwd).multiplyScalar(f).addScaledVector(right, s).normalize().multiplyScalar(speed);
+    }
+    // Quick to start and stop on the ground, floaty in the air.
+    const accel = this.grounded ? (amount > 0.05 ? 11 : 14) : 3;
+    this.vel.lerp(desired, 1 - Math.exp(-accel * dt));
+    this.vel.addScaledVector(this.dir, -this.vel.dot(this.dir));
+    const speedNow = this.vel.length();
+    this.moving = speedNow > 0.8;
+    if (speedNow > 0.01) {
       const radius = ground + this.alt;
-      this.dir.multiplyScalar(radius).add(tmp).normalize();
+      this.dir.multiplyScalar(radius).addScaledVector(this.vel, dt).normalize();
       this.fwd.addScaledVector(this.dir, -this.fwd.dot(this.dir)).normalize();
     }
 
-    // Jump from the ground; keep holding Space after the jump's peak to fire the jetpack.
-    const space = allowMove && input.down('Space');
+    // Jump from the ground; keep holding jump after the jump's peak to fire the jetpack.
+    const space = allowMove && input.jumping();
     this.jetting = false;
     if (space && this.grounded) {
       this.vAlt = JUMP;
@@ -97,6 +117,8 @@ export class LocalPlayer {
     const next = this.groundRadius(world);
     const absolute = ground + this.alt;
     this.alt = absolute - next.ground;
+    // Walking down a gentle slope keeps the feet on the ground instead of hopping.
+    if (this.grounded && this.vAlt <= 0 && this.alt < 0.6) this.alt = 0;
     if (this.alt <= 0) {
       this.alt = 0;
       this.vAlt = 0;
@@ -146,8 +168,12 @@ export class LocalPlayer {
     return this.ground + this.alt - this.surface;
   }
 
-  updateCamera(camera, world) {
-    const target = this.position(tmp).addScaledVector(this.dir, 1.85);
+  updateCamera(camera, world, dt = 1 / 60) {
+    // The camera's height eases after the pilot, so bumps and landings don't jolt the view.
+    const r = this.ground + this.alt;
+    if (!this.camRadius || Math.abs(this.camRadius - r) > 6) this.camRadius = r;
+    this.camRadius += (r - this.camRadius) * (1 - Math.exp(-14 * dt));
+    const target = tmp.copy(this.dir).multiplyScalar(this.camRadius).addScaledVector(this.dir, 1.85);
     right.crossVectors(this.fwd, this.dir).normalize();
     target.addScaledVector(right, 0.75);
     this.aim
@@ -159,13 +185,17 @@ export class LocalPlayer {
     let d = CAM_DIST;
     for (; d > 1.2; d -= 0.4) {
       this.camPos.copy(target).addScaledVector(this.aim, -d);
-      const r = this.camPos.length();
-      probe[0] = this.camPos.x / r;
-      probe[1] = this.camPos.y / r;
-      probe[2] = this.camPos.z / r;
+      const len = this.camPos.length();
+      probe[0] = this.camPos.x / len;
+      probe[1] = this.camPos.y / len;
+      probe[2] = this.camPos.z / len;
       const ground = world.terrain.surfaceRadius(probe);
-      if (r > ground + 0.6 && !this.insideBuilding(world, probe, r - ground)) break;
+      if (len > ground + 0.6 && !this.insideBuilding(world, probe, len - ground)) break;
     }
+    // Pull in fast when something blocks the view, drift back out gently.
+    const k = d < this.camDist ? 1 - Math.exp(-30 * dt) : 1 - Math.exp(-4 * dt);
+    this.camDist += (d - this.camDist) * k;
+    this.camPos.copy(target).addScaledVector(this.aim, -this.camDist);
     camera.position.copy(this.camPos);
     camera.up.copy(this.dir);
     camera.lookAt(tmp.copy(this.camPos).add(this.aim));
@@ -178,10 +208,12 @@ export class LocalPlayer {
   }
 
   pose() {
-    const r = (v) => Math.round(v * 1000) / 1000;
+    // Directions need ~1e-6 precision on a 1200 m planet (about 1 mm); facing is coarser.
+    const r = (v) => Math.round(v * 1e6) / 1e6;
+    const rf = (v) => Math.round(v * 1000) / 1000;
     return {
       d: [r(this.dir.x), r(this.dir.y), r(this.dir.z)],
-      f: [r(this.fwd.x), r(this.fwd.y), r(this.fwd.z)],
+      f: [rf(this.fwd.x), rf(this.fwd.y), rf(this.fwd.z)],
       h: Math.round(this.heightAboveTerrain() * 100) / 100,
       a: this.jetting ? 3 : !this.grounded ? 2 : this.moving ? 1 : 0,
     };

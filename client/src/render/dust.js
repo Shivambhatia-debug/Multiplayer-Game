@@ -1,6 +1,7 @@
 // Martian atmosphere up close: fine dust drifting past the camera, and a couple of
 // dust devils wandering the plains.
 import * as THREE from 'three';
+import { PLANET_RADIUS as R } from '../sim/terrain.js';
 
 function softDot() {
   const c = document.createElement('canvas');
@@ -14,9 +15,18 @@ function softDot() {
   return new THREE.CanvasTexture(c);
 }
 
-const MOTES = 900;
+const MOTES = 600;
 const BOX = 28;
-const DEVIL_PARTICLES = 700;
+const DEVIL_PARTICLES = 500;
+const helperA = new THREE.Vector3(0, 1, 0);
+const helperB = new THREE.Vector3(1, 0, 0);
+const e1 = new THREE.Vector3();
+const e2 = new THREE.Vector3();
+const t1 = new THREE.Vector3();
+const t2 = new THREE.Vector3();
+const center = new THREE.Vector3();
+const dirV = new THREE.Vector3();
+const base = new THREE.Vector3();
 
 export class Dust {
   constructor(scene) {
@@ -81,17 +91,18 @@ export class Dust {
 
     // Each devil circles the player at a distance, drifting slowly.
     const up = focus;
-    const helper = Math.abs(up.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-    const e1 = new THREE.Vector3().crossVectors(up, helper).normalize();
-    const e2 = new THREE.Vector3().crossVectors(up, e1);
+    if (this.lowQuality) return;
+    const helper = Math.abs(up.y) < 0.9 ? helperA : helperB;
+    e1.crossVectors(up, helper).normalize();
+    e2.crossVectors(up, e1);
     for (const d of this.devils) {
       const a = t * 0.03 + d.phase;
       const dist = 55 + Math.sin(t * 0.05 + d.phase) * 12;
-      const center = up.clone().multiplyScalar(50).addScaledVector(e1, Math.cos(a) * dist).addScaledVector(e2, Math.sin(a) * dist);
-      const dir = center.clone().normalize();
-      const base = dir.clone().multiplyScalar(world.terrain.surfaceRadius([dir.x, dir.y, dir.z]));
-      const t1 = new THREE.Vector3().crossVectors(dir, helper).normalize();
-      const t2 = new THREE.Vector3().crossVectors(dir, t1);
+      center.copy(up).multiplyScalar(R).addScaledVector(e1, Math.cos(a) * dist).addScaledVector(e2, Math.sin(a) * dist);
+      const dir = dirV.copy(center).normalize();
+      base.copy(dir).multiplyScalar(world.terrain.surfaceRadius([dir.x, dir.y, dir.z]));
+      t1.crossVectors(dir, helper).normalize();
+      t2.crossVectors(dir, t1);
       for (let i = 0; i < DEVIL_PARTICLES; i++) {
         const s0 = d.seeds[i * 3];
         const s1 = d.seeds[i * 3 + 1];

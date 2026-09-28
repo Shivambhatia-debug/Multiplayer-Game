@@ -1,9 +1,9 @@
 // The Ares colony, laid out like a real settlement: a reactor plaza at the centre, four
 // paved roads, a perimeter wall with gates, and four districts (research, habitation,
-// landing pad, industry). A few abandoned outposts sit elsewhere on the planet.
+// landing pad, industry). A few abandoned outposts sit out on the plains.
 // Shared by the renderer (visuals), the controller (collision) and placement rules.
 import { mulberry32 } from './noise.js';
-import { randomDir, dist, norm, cross, dot } from './vec.js';
+import { norm, cross, dot } from './vec.js';
 import { PLANET_RADIUS as R } from './terrain.js';
 
 export const PLAZA_RADIUS = 9;
@@ -157,10 +157,11 @@ export function createRuins(seed, baseDir) {
     put('wall', Math.sin(r) * WALL_RADIUS, Math.cos(r) * WALL_RADIUS, a + 90);
   }
 
-  // ---- Abandoned outposts elsewhere on the planet: a lab with containers in a row ----
-  for (let s = 0; s < 8; s++) {
-    let center = randomDir(rand);
-    for (let k = 0; k < 5 && dist(center, baseDir) * R < 70; k++) center = randomDir(rand);
+  // ---- Abandoned outposts out on the plains: a lab with containers in a row ----
+  for (let s = 0; s < 6; s++) {
+    const ang = ((s + rand() * 0.6) / 6) * Math.PI * 2;
+    const d = 85 + rand() * 70;
+    const center = localToDir(frame, Math.sin(ang) * d, Math.cos(ang) * d);
     const f = colonyFrame(center);
     const yaw = rand() * Math.PI * 2;
     const at = (x, z) => {

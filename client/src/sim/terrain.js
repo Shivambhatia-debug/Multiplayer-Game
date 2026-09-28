@@ -1,7 +1,9 @@
 import { createNoise3D, mulberry32 } from './noise.js';
-import { randomDir, dot } from './vec.js';
+import { dot } from './vec.js';
 
-export const PLANET_RADIUS = 50;
+// A big planet, so the ground around the colony reads as a flat plain with a far horizon
+// rather than a small ball. All terrain features are sized in metres, not in angles.
+export const PLANET_RADIUS = 1200;
 
 /** Where the Ares colony (and its reactor) stands. The ground there is levelled. */
 export const BASE_DIR = (() => {
@@ -9,56 +11,76 @@ export const BASE_DIR = (() => {
   const l = Math.hypot(...v);
   return v.map((x) => x / l);
 })();
-const BASE_FLAT = 1.0; // radians of flattened ground around the colony (~50 m)
-const BASE_HEIGHT = 1.2;
+const BASE_HEIGHT = 0.4;
+const FLAT_RADIUS = 58; // metres of levelled ground around the reactor (the wall is at 45 m)
+const BLEND = 45; // metres over which the plateau blends into the wild terrain
+
+const smooth = (a, b, x) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 /**
- * Deterministic planet heightfield. `height(dir)` returns the offset from PLANET_RADIUS.
- * Rolling continents, ridged mountain ranges, small-scale bumps and impact craters.
+ * Deterministic heightfield. `height(dir)` returns metres above PLANET_RADIUS.
+ * Gentle dunes and rolling plains near the colony, rocky hills further out, and ridged
+ * mountain ranges ringing the horizon. A few impact craters sit out on the plains.
  */
 export function createTerrain(seed) {
   const noise = createNoise3D(seed);
   const rand = mulberry32(seed ^ 0x9e3779b9);
-  const craters = Array.from({ length: 9 }, () => ({ dir: randomDir(rand), size: 0.05 + rand() * 0.08, depth: 1.2 + rand() * 1.6 }));
+  const R = PLANET_RADIUS;
+  // Crater centres in metres around the colony (placed on the plains outside the wall).
+  const craters = Array.from({ length: 7 }, () => {
+    const a = rand() * Math.PI * 2;
+    const d = 85 + rand() * 170;
+    return { a, d, size: 7 + rand() * 13, depth: 1 + rand() * 2 };
+  });
+  const up = BASE_DIR;
+  const north = (() => {
+    const n = [-up[0] * up[1], 1 - up[1] * up[1], -up[2] * up[1]];
+    const l = Math.hypot(...n);
+    return n.map((x) => x / l);
+  })();
+  const east = [north[1] * up[2] - north[2] * up[1], north[2] * up[0] - north[0] * up[2], north[0] * up[1] - north[1] * up[0]];
+  const craterDirs = craters.map((c) => {
+    const x = Math.sin(c.a) * c.d;
+    const z = Math.cos(c.a) * c.d;
+    const v = [up[0] * R + east[0] * x + north[0] * z, up[1] * R + east[1] * x + north[1] * z, up[2] * R + east[2] * x + north[2] * z];
+    const l = Math.hypot(...v);
+    return v.map((k) => k / l);
+  });
 
   function height(dir) {
-    const [x, y, z] = dir;
-    // Continents: very low frequency, decides lowland versus highland.
-    const continent = noise(x * 0.9 + 40, y * 0.9 - 12, z * 0.9 + 7);
-    // Rolling hills.
-    let hills = 0;
-    let amp = 1;
-    let f = 2.4;
-    for (let o = 0; o < 4; o++) {
-      hills += noise(x * f + o * 17.1, y * f - o * 3.7, z * f + o * 9.3) * amp;
-      amp *= 0.5;
-      f *= 2.1;
+    // Position on the sphere in metres; noise wavelengths below are in metres too.
+    const x = dir[0] * R;
+    const y = dir[1] * R;
+    const z = dir[2] * R;
+    const fromBase = Math.acos(Math.min(1, dot(dir, BASE_DIR))) * R;
+
+    // Rolling plains: long, low swells.
+    let h = noise(x / 140 + 40, y / 140 - 12, z / 140 + 7) * 3.2;
+    h += noise(x / 55 + 3.1, y / 55 - 7.7, z / 55 + 1.9) * 1.3;
+    // Dunes and ripples.
+    h += noise(x / 16 - 9, y / 16 + 4, z / 16 + 12) * 0.35;
+    // Hills and mountains rise with distance, so the colony sits in a wide valley.
+    const wild = smooth(70, 320, fromBase);
+    if (wild > 0) {
+      const r1 = 1 - Math.abs(noise(x / 120 - 31, y / 120 + 5, z / 120 + 13));
+      const r2 = 1 - Math.abs(noise(x / 48 + 17, y / 48 - 23, z / 48 - 5));
+      h += (r1 * r1 * 30 + r2 * r2 * 7) * wild;
+      h += noise(x / 30 - 2, y / 30 + 9, z / 30 - 4) * 2.2 * wild;
     }
-    // Ridged mountains, only on high ground.
-    let ridge = 0;
-    amp = 1;
-    f = 1.8;
-    for (let o = 0; o < 3; o++) {
-      const r = 1 - Math.abs(noise(x * f - 31, y * f + 5, z * f + 13 * o));
-      ridge += r * r * amp;
-      amp *= 0.45;
-      f *= 2.2;
-    }
-    const highland = Math.max(0, Math.min(1, (continent + 0.05) * 3));
-    let h = continent * 4.2 + hills * 1.6 + ridge * highland * 4.2 - 1;
-    for (const c of craters) {
-      const d = Math.acos(Math.min(1, dot(dir, c.dir)));
-      if (Math.acos(Math.min(1, dot(c.dir, BASE_DIR))) < BASE_FLAT * 1.4) continue;
-      if (d < c.size * 1.35) {
+    for (let i = 0; i < craters.length; i++) {
+      const c = craters[i];
+      const d = Math.acos(Math.min(1, dot(dir, craterDirs[i]))) * R;
+      if (d < c.size * 1.4) {
         const t = d / c.size;
-        h += t < 1 ? -c.depth * (1 - t * t) : c.depth * 0.6 * Math.sin(((t - 1) / 0.35) * Math.PI);
+        h += t < 1 ? -c.depth * (1 - t * t) : c.depth * 0.5 * Math.sin(((t - 1) / 0.4) * Math.PI);
       }
     }
     // Level a plateau for the colony, blending smoothly into the surrounding land.
-    const fromBase = Math.acos(Math.min(1, dot(dir, BASE_DIR)));
-    if (fromBase < BASE_FLAT * 1.5) {
-      const t = Math.min(1, Math.max(0, (fromBase - BASE_FLAT) / (BASE_FLAT * 0.5)));
-      const k = t * t * (3 - 2 * t);
+    if (fromBase < FLAT_RADIUS + BLEND) {
+      const k = smooth(FLAT_RADIUS, FLAT_RADIUS + BLEND, fromBase);
       h = BASE_HEIGHT + (h - BASE_HEIGHT) * k;
     }
     return h;

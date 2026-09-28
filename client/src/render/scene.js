@@ -29,6 +29,7 @@ import { Survivors } from './survivors.js';
 const UP = new THREE.Vector3(0, 1, 0);
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
+const tmpV3 = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion();
 const tmpM = new THREE.Matrix4();
 
@@ -96,8 +97,10 @@ const GRADE_SHADER = {
 export class GameRenderer {
   constructor(canvas) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+    this.basePixelRatio = 1;
+    this.resScale = 1;
+    this.perf = { time: 0, frames: 0, cooldown: 2 };
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
@@ -105,19 +108,20 @@ export class GameRenderer {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x02030a);
-    this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 3000);
+    this.camera = new THREE.PerspectiveCamera(62, 1, 0.15, 3000);
     this.camera.position.set(0, 20, 80);
 
     this.buildLights();
     this.buildSky();
-    this.buildAtmosphere();
     this.sky = new SkyDome(this.scene);
     this.terrainView = new TerrainView(this.scene);
     this.ruinsView = new RuinsView(this.scene);
     this.dust = new Dust(this.scene);
     this.survivors = new Survivors(this.scene);
     this.fog = new THREE.FogExp2(0x000000, 0.01);
-    this.mode = null;
+    this.scene.fog = this.fog;
+    this.sky.mesh.visible = true;
+    this.dust.setVisible(true);
 
     this.fx = new Effects(this.scene);
     this.entities = new THREE.Group();
@@ -149,20 +153,26 @@ export class GameRenderer {
     window.addEventListener('resize', () => this.resize());
   }
 
-  /** 'high' = shadows, MSAA and full resolution; 'low' = lighter settings for weaker GPUs. */
+  /**
+   * 'high' = shadows, MSAA, lamp lights and sharper resolution; 'low' = lighter settings for
+   * phones and weaker GPUs. On top of either, the resolution adapts to keep the frame rate up.
+   */
   setQuality(q) {
     this.quality = q;
     const high = q === 'high';
-    this.renderer.setPixelRatio(high ? Math.min(window.devicePixelRatio, 2) : 1);
+    this.basePixelRatio = high ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 1);
+    this.resScale = 1;
     this.renderer.shadowMap.enabled = high;
     this.sun.castShadow = high;
     for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
       rt.samples = high ? 4 : 0;
       rt.dispose();
     }
-    this.bloom.resolution.set(high ? 256 : 128, high ? 256 : 128);
-    for (const d of this.dust.devils) d.pts.visible = high && this.dust.visible;
+    this.bloomScale = high ? 0.6 : 0.35;
     this.dust.lowQuality = !high;
+    this.dust.setVisible(true);
+    this.ruinsView.lightsEnabled = high;
+    for (const r of this.terrainView.rocks) r.castShadow = high;
     this.scene.traverse((o) => {
       if (o.material) {
         const list = Array.isArray(o.material) ? o.material : [o.material];
@@ -172,11 +182,38 @@ export class GameRenderer {
     this.resize();
   }
 
+  /** Lowers the render resolution when frames run slow, and raises it again when there is headroom. */
+  adaptResolution(dt) {
+    const p = this.perf;
+    p.time += dt;
+    p.frames++;
+    p.cooldown -= dt;
+    if (p.time < 1.2) return;
+    const avg = p.time / p.frames;
+    p.time = 0;
+    p.frames = 0;
+    if (p.cooldown > 0) return;
+    let next = this.resScale;
+    if (avg > 1 / 42) next = Math.max(0.55, this.resScale * 0.85);
+    else if (avg < 1 / 57) next = Math.min(1, this.resScale * 1.1);
+    if (Math.abs(next - this.resScale) > 0.01) {
+      this.resScale = next;
+      p.cooldown = 1.5;
+      this.resize();
+    }
+  }
+
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const ratio = this.basePixelRatio * this.resScale;
+    this.renderer.setPixelRatio(ratio);
+    this.composer.setPixelRatio(ratio);
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
+    // Bloom is soft anyway, so it runs at a fraction of the screen resolution.
+    const b = this.bloomScale ?? 0.5;
+    this.bloom.setSize(Math.max(64, Math.round(w * ratio * b)), Math.max(64, Math.round(h * ratio * b)));
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -185,6 +222,12 @@ export class GameRenderer {
     this.sun = new THREE.DirectionalLight(0xffe2c4, 2.4);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
+    const sc = this.sun.shadow.camera;
+    sc.left = sc.bottom = -40;
+    sc.right = sc.top = 40;
+    sc.near = 1;
+    sc.far = 300;
+    sc.updateProjectionMatrix();
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
@@ -195,6 +238,8 @@ export class GameRenderer {
     this.hemi = new THREE.HemisphereLight(0xd9a070, 0x3a2016, 0);
     this.scene.add(this.hemi);
     this.headlamp = new THREE.PointLight(0xffe2b8, 0, 18, 1);
+    this.headlamp.visible = false;
+    this.sunV = new THREE.Vector3(1, 0, 0);
     this.scene.add(this.headlamp);
   }
 
@@ -251,46 +296,6 @@ export class GameRenderer {
     }
   }
 
-  buildAtmosphere() {
-    this.atmoUniforms = {
-      uColor: { value: new THREE.Color(0xff9a5a) },
-      uSun: { value: new THREE.Vector3(1, 0, 0) },
-      uStrength: { value: 1.1 },
-    };
-    this.atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.2, 96, 64),
-      new THREE.ShaderMaterial({
-        uniforms: this.atmoUniforms,
-        vertexShader: /* glsl */ `
-          varying vec3 vN;
-          varying vec3 vView;
-          void main() {
-            vec4 wp = modelMatrix * vec4(position, 1.0);
-            vN = normalize(mat3(modelMatrix) * normal);
-            vView = normalize(cameraPosition - wp.xyz);
-            gl_Position = projectionMatrix * viewMatrix * wp;
-          }`,
-        fragmentShader: /* glsl */ `
-          uniform vec3 uColor;
-          uniform vec3 uSun;
-          uniform float uStrength;
-          varying vec3 vN;
-          varying vec3 vView;
-          void main() {
-            float d = -dot(vView, vN);
-            float glow = pow(smoothstep(0.0, 0.72, d), 1.6);
-            float day = smoothstep(-0.45, 0.55, dot(vN, uSun)) * 0.92 + 0.08;
-            gl_FragColor = vec4(uColor * glow * day * uStrength, glow * day);
-          }`,
-        side: THREE.BackSide,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-    );
-    this.scene.add(this.atmosphere);
-  }
-
   /** Rebuilds terrain, ruins and the reactor when the planet seed changes. */
   setWorld(world) {
     if (world.seed === this.seed) return;
@@ -323,24 +328,6 @@ export class GameRenderer {
 
   surfaceAt(dir) {
     return this.world ? this.world.terrain.surfaceRadius(dir) : R;
-  }
-
-  /** Switches between the orbital view (menus) and standing on the surface (playing). */
-  setMode(mode) {
-    if (mode === this.mode) return;
-    this.mode = mode;
-    const surface = mode === 'surface';
-    this.scene.fog = surface ? this.fog : null;
-    this.sky.mesh.visible = surface;
-    this.atmosphere.visible = !surface;
-    this.dust.setVisible(surface);
-    const sc = this.sun.shadow.camera;
-    const half = surface ? 45 : R + 10;
-    sc.left = sc.bottom = -half;
-    sc.right = sc.top = half;
-    sc.near = surface ? 1 : 20;
-    sc.far = surface ? 300 : 320;
-    sc.updateProjectionMatrix();
   }
 
   syncStructures(world, now) {
@@ -389,7 +376,7 @@ export class GameRenderer {
       }
     }
     if (!best) return;
-    const local = entry.obj.worldToLocal(best.obj.position.clone());
+    const local = entry.obj.worldToLocal(tmpV.copy(best.obj.position));
     const target = Math.atan2(local.x, local.z);
     entry.yaw += Math.atan2(Math.sin(target - entry.yaw), Math.cos(target - entry.yaw)) * 0.25;
     entry.head.rotation.y = entry.yaw;
@@ -487,7 +474,7 @@ export class GameRenderer {
         this.fx.burst(p, 0x6dff5a, 26, 5, 0.7);
       }
       const target = tmpV.set(...e.dir);
-      const move = target.clone().sub(entry.up);
+      const move = tmpV3.copy(target).sub(entry.up);
       if (move.lengthSq() > 1e-9) {
         move.addScaledVector(entry.up, -move.dot(entry.up));
         if (move.lengthSq() > 1e-10) entry.fwd.lerp(move.normalize(), 0.15);
@@ -557,7 +544,7 @@ export class GameRenderer {
       a.label.visible = !p.isLocal && !a.board;
       if (a.board) continue;
       const k = p.isLocal ? 1 : 1 - Math.exp(-14 * dt);
-      const teleport = a.dir.distanceTo(tmpV.set(...p.pose.d)) > 0.2;
+      const teleport = a.dir.distanceTo(tmpV.set(...p.pose.d)) * R > 12;
       a.dir.lerp(tmpV.set(...p.pose.d), teleport ? 1 : k).normalize();
       a.fwd.lerp(tmpV.set(...p.pose.f), k);
       a.fwd.addScaledVector(a.dir, -a.fwd.dot(a.dir)).normalize();
@@ -602,23 +589,25 @@ export class GameRenderer {
   }
 
   updateEnvironment(world, dt, focus) {
-    const sunV = new THREE.Vector3(...sunDir(world.simTime));
-    this.setMode(focus ? 'surface' : 'orbit');
+    const sunV = this.sunV.set(...sunDir(world.simTime));
+    const cam = this.camera.position;
 
-    // The sun's shadow camera follows the player so shadows stay crisp on a big planet.
-    const center = focus ? tmpV.copy(focus).multiplyScalar(R) : tmpV.set(0, 0, 0);
+    // The sun's shadow camera follows the player so shadows stay crisp.
+    const center = tmpV.copy(focus).multiplyScalar(R);
     this.sun.target.position.copy(center);
     this.sun.position.copy(center).addScaledVector(sunV, 150);
-    this.fill.position.copy(sunV).multiplyScalar(-60);
-    this.sunSprite.position.copy(this.camera.position).addScaledVector(sunV, 700);
-    this.atmoUniforms.uSun.value.copy(sunV);
+    this.fill.position.copy(center).addScaledVector(sunV, -60);
+    this.fill.target = this.sun.target;
+    this.sunSprite.position.copy(cam).addScaledVector(sunV, 700);
+    // Stars and moons are far away, so they travel with the camera.
+    this.stars.position.copy(cam);
     this.moons.forEach((m, i) => {
       const a = world.simTime * m.speed + i * 2.4;
-      m.mesh.position.set(Math.cos(a) * m.dist, Math.sin(a * 0.7 + m.tilt) * m.dist * 0.4, Math.sin(a) * m.dist);
+      m.mesh.position.set(cam.x + Math.cos(a) * m.dist, cam.y + Math.sin(a * 0.7 + m.tilt) * m.dist * 0.4, cam.z + Math.sin(a) * m.dist);
       m.mesh.rotation.y += dt * 0.05;
     });
 
-    if (focus) {
+    {
       this.sky.update(this.camera, focus, sunV, 0);
       const day = this.sky.daylight;
       this.night = 1 - day;
@@ -633,19 +622,9 @@ export class GameRenderer {
       this.sun.color.copy(this.sky.uniforms.uSunTint.value);
       this.fill.intensity = 0.12;
       this.headlamp.intensity = (1 - day) * 5;
+      this.headlamp.visible = day < 0.95;
       this.stars.material.opacity = Math.max(0, 1 - day * 1.3);
       this.sunSprite.material.opacity = day > 0.01 ? 1 : 0.3;
-    } else {
-      this.night = 0;
-      this.scene.background.setRGB(0.008, 0.012, 0.035);
-      this.hemi.intensity = 0;
-      this.ambient.intensity = 0.55;
-      this.sun.intensity = 2.4;
-      this.sun.color.set(0xffe2c4);
-      this.fill.intensity = 0.35;
-      this.headlamp.intensity = 0;
-      this.stars.material.opacity = 1;
-      this.sunSprite.material.opacity = 1;
     }
     this.ruinsView.update(this.clock, this.night);
 
@@ -764,6 +743,7 @@ export class GameRenderer {
   }
 
   render(dt) {
+    this.adaptResolution(dt);
     if (this.shake > 0.001) {
       const s = this.shake;
       this.camera.position.x += (Math.random() - 0.5) * s;

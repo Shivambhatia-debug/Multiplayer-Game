@@ -14,7 +14,9 @@
 - **A planned colony:** a reactor plaza, four paved roads with lamps, a perimeter wall with gates, and four districts: research labs with specimen tanks, habitation domes and a greenhouse, the evac landing pad with control tower and fuel tanks, and an industrial yard with containers, rovers, a solar farm and a comms tower. Outposts elsewhere lie abandoned. Buildings block movement and the camera.
 - **Human survivors:** pilots are humans in pressure suits with bubble helmets and walk cycles. Six colony scientists type at consoles, stand guard and haul crates around the plaza.
 - **The rescue:** survive all 10 waves and the evacuation ship ARK-7 lands on the pad. Scientists and pilots run up the ramp and the ship lifts off. If the reactor falls instead, it explodes.
-- **Realistic Mars:** rust dust, dark basaltic sand, bump-mapped gravel, noise-shaped boulders, floating dust, dust devils, a butterscotch sky with blue sunsets, and the moons Phobos and Deimos. Rendering uses MSAA, bloom and a cinematic grade. The Graphics toggle in the menu switches to Low for weaker GPUs.
+- **Realistic Mars:** a wide, flat plain with a far horizon (the planet is 1.2 km in radius, so the ground no longer curves like a small ball), dunes, craters, distant mountain ranges, rust dust, dark basaltic sand, bump-mapped gravel, noise-shaped boulders, floating dust, dust devils, a butterscotch sky with blue sunsets, and the moons Phobos and Deimos. Rendering uses MSAA, bloom and a cinematic grade.
+- **Smooth on any device:** movement accelerates and brakes smoothly and the camera eases after you. Phones and weaker PCs start on Low graphics, and the render resolution adapts automatically to keep the frame rate up.
+- **Plays on phones:** a floating thumb stick, drag-to-look and thumb buttons (Fire, Jump, Run, Build, Ping and Salvage), plus a layout that fits landscape and portrait screens. Starting a mission on a phone switches to fullscreen landscape.
 - Every pilot has **health**. The Xal attack pilots, buildings and the reactor. A downed pilot respawns at the reactor after 6 seconds.
 - Room codes, invite links, drop-in/drop-out play and host migration. Everything is procedural, with no downloaded models, textures or sounds.
 
@@ -30,6 +32,8 @@
 | `X` | Salvage the nearest defence (50% refund) |
 | `Q` | Ping a spot for your team |
 | `H` / `M` | Field manual / mute |
+
+**On a phone or tablet:** drag on the left half of the screen to move (push to the edge to run), and drag on the right half to look. Hold **Fire** to shoot, tap **Jump** and hold it in the air for the jetpack, tap a slot at the bottom and then **Build** to place it, and tap **?** for the field manual. Add `?touch=1` to the URL to try the touch controls on a desktop.
 
 | Defence | Cost | What it does |
 | --- | --- | --- |
@@ -50,7 +54,7 @@
 │  ├ sim/     waves, aliens, combat, colony layout │ ─────► │ server/api/token.js    Ably tokens    │
 │  ├ render/  Mars terrain, ruins, sky, bloom, FX  │        │ server/api/rooms/[code].js  lookup    │
 │  ├ net/     Session (host logic) + transports    │        └──────────────────────────────────────┘
-│  └ game/    sphere-walking controller, input     │                       │ API key stays here
+│  └ game/    controller, keyboard + touch input   │                       │ API key stays here
 └──────────────────────────────────────────────────┘                       ▼
               ▲   realtime pub/sub + presence (WebSocket)          ┌──────────────┐
               └────────────────────────────────────────────────────│     Ably     │
@@ -121,7 +125,7 @@ client/                    Netlify site
   src/render/              scene.js (lights, reactor, aliens, turrets, post-processing), intro.js (opening cinematic),
                            terrainView.js (Mars ground, rocks), ruinsView.js (colony buildings), survivors.js
                            (scientists + rescue ship), dust.js, materials.js, sky.js, models.js, fx.js
-  src/game/                controller.js (sphere movement + camera), input.js
+  src/game/                controller.js (movement + camera), input.js, touch.js (phone controls)
   src/ui/hud.js            HUD, objectives, toasts
   src/audio.js             procedural music and sound effects
 server/                    Vercel project
@@ -132,9 +136,8 @@ netlify.toml               Netlify build config
 
 ## Roadmap to the next level
 
-1. **Touch controls** for phones (virtual stick, tap to build, auto-fire), plus a quality toggle that turns off shadows and bloom on weak GPUs.
-2. **Story missions:** explore abandoned labs between waves for data logs about SENTINEL and upgrades.
-3. **Weapons and classes:** Engineer (repairs, cheaper turrets), Medic (heal beam), Heavy (shotgun). This gives each player a reason to coordinate.
-4. **Boss wave:** a Xal mothership that must be shot down from the comms tower.
-5. **Persistence:** an Upstash Redis leaderboard (through the Vercel Marketplace) of highest wave reached per player count.
-6. **Server-side validation:** if the game grows public, move the host simulation into a Durable Object or a small Fly.io service so no player can cheat as host.
+1. **Story missions:** explore abandoned labs between waves for data logs about SENTINEL and upgrades.
+2. **Weapons and classes:** Engineer (repairs, cheaper turrets), Medic (heal beam), Heavy (shotgun). This gives each player a reason to coordinate.
+3. **Boss wave:** a Xal mothership that must be shot down from the comms tower.
+4. **Persistence:** an Upstash Redis leaderboard (through the Vercel Marketplace) of highest wave reached per player count.
+5. **Server-side validation:** if the game grows public, move the host simulation into a Durable Object or a small Fly.io service so no player can cheat as host.

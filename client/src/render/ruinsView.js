@@ -386,7 +386,7 @@ export class RuinsView {
     this.scene.add(this.group);
 
     // Real lights on the main roads so the colony glows at night.
-    const lamps = world.ruins.filter((it) => it.kind === 'lamp' && it.x !== null && Math.hypot(it.x, it.z) < 22).slice(0, 6);
+    const lamps = world.ruins.filter((it) => it.kind === 'lamp' && it.x !== null && Math.hypot(it.x, it.z) < 22).slice(0, 4);
     for (const it of lamps) {
       const light = new THREE.PointLight(0xffc98a, 0, 18, 1.4);
       up.set(...it.dir);
@@ -406,6 +406,11 @@ export class RuinsView {
     M.liquid.emissiveIntensity = 0.9 + Math.sin(t * 1.7) * 0.3;
     M.screen.emissiveIntensity = 2.2 + Math.sin(t * 9) * 0.3;
     M.padLight.emissiveIntensity = 1.5 + (Math.sin(t * 4) > 0 ? 2.5 : 0);
-    for (const l of this.lights) l.intensity = night * 16;
+    // Lights only exist at night (and on High graphics): each point light costs every pixel.
+    const on = this.lightsEnabled !== false && night > 0.05;
+    for (const l of this.lights) {
+      l.visible = on;
+      l.intensity = night * 16;
+    }
   }
 }

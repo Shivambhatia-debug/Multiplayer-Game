@@ -1773,3 +1773,632 @@ h1 span {
 #hud.cinematic > * {
   display: none !important;
 }
+
+/* ---------- Performance: no live blur over the 3D view ----------
+   backdrop-filter re-blurs the WebGL canvas behind every HUD panel on every frame. */
+#hud .panel,
+#hud #radar,
+#hud .slot {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(7, 11, 19, 0.72);
+}
+
+#hud .slot.active {
+  background: color-mix(in srgb, var(--slot-color) 16%, rgba(7, 11, 19, 0.8));
+}
+
+/* ---------- Touch devices ---------- */
+.touch-only {
+  display: none;
+}
+
+body.touch .touch-only {
+  display: revert;
+}
+
+body.touch .kb-only {
+  display: none;
+}
+
+body.touch {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.touch input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.touch-layer,
+.touch-pad,
+.touch-top {
+  display: none;
+}
+
+body.touch .touch-layer {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+body.touch .touch-pad,
+body.touch .touch-top {
+  display: block;
+}
+
+.stick-base {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 124px;
+  height: 124px;
+  margin: -62px 0 0 -62px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  background: radial-gradient(circle, rgba(7, 11, 19, 0.15), rgba(7, 11, 19, 0.45));
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.stick-base.on {
+  opacity: 1;
+}
+
+.stick-base.run {
+  border-color: var(--warn);
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: rgba(237, 243, 251, 0.85);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.tbtn {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  background: rgba(7, 11, 19, 0.55);
+  color: var(--text);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  padding: 0;
+  transition: transform 0.08s, background 0.15s;
+}
+
+.tbtn.pressed {
+  transform: scale(0.92);
+  background: rgba(124, 247, 212, 0.3);
+}
+
+.touch-pad {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: 230px;
+  height: 230px;
+  pointer-events: none;
+}
+
+.touch-pad.dead {
+  opacity: 0.35;
+}
+
+.tbtn.fire {
+  right: 0;
+  bottom: 0;
+  width: 92px;
+  height: 92px;
+  font-size: 15px;
+  border-color: rgba(255, 90, 106, 0.8);
+  background: rgba(255, 90, 106, 0.28);
+}
+
+.tbtn.fire.build {
+  border-color: var(--accent);
+  background: rgba(124, 247, 212, 0.28);
+}
+
+.tbtn.jump {
+  right: 104px;
+  bottom: 4px;
+  width: 68px;
+  height: 68px;
+}
+
+.tbtn.sprint {
+  right: 94px;
+  bottom: 84px;
+  width: 56px;
+  height: 56px;
+  font-size: 11px;
+}
+
+.tbtn.sprint.on {
+  border-color: var(--warn);
+  background: rgba(255, 177, 74, 0.3);
+}
+
+.tbtn.mini {
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.tbtn.ping {
+  right: 24px;
+  bottom: 106px;
+}
+
+.tbtn.cancel {
+  right: 24px;
+  bottom: 160px;
+  border-color: var(--danger);
+}
+
+.tbtn.wide {
+  right: 0;
+  bottom: 158px;
+  width: auto;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 11px;
+  border-color: var(--gold);
+  white-space: nowrap;
+}
+
+.touch-top {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  gap: 8px;
+}
+
+body.touch .touch-top {
+  display: flex;
+}
+
+.touch-top .tbtn {
+  position: static;
+  width: 38px;
+  height: 38px;
+  font-size: 16px;
+}
+
+body.touch #build-info,
+body.touch .slot .key,
+body.touch .menu-foot {
+  display: none !important;
+}
+
+body.touch #crosshair {
+  width: 30px;
+  height: 30px;
+}
+
+#rotate-hint {
+  display: none;
+}
+
+@media (orientation: portrait) {
+  body.touch #rotate-hint {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 30;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: var(--panel-strong);
+    border: 1px solid var(--line-strong);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: hint-fade 4s ease 1.5s forwards;
+  }
+
+  body.touch #hud.hidden ~ #rotate-hint {
+    display: none;
+  }
+}
+
+@keyframes hint-fade {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* In-game HUD on phones: compact, clear of the thumbs. */
+@media (max-width: 900px), (max-height: 520px) {
+  #vitals {
+    top: max(8px, env(safe-area-inset-top));
+    left: max(8px, env(safe-area-inset-left));
+    width: 200px;
+    padding: 9px 10px;
+    gap: 7px;
+    transform: none;
+  }
+
+  #vitals .vital {
+    font-size: 12px;
+    gap: 3px;
+    line-height: 1.2;
+  }
+
+  #vitals .energy-block .energy b {
+    font-size: 22px;
+  }
+
+  #vitals .meta {
+    font-size: 11px;
+  }
+
+  #compass-wrap {
+    top: max(8px, env(safe-area-inset-top));
+    width: min(420px, 40vw);
+    gap: 4px;
+  }
+
+  #compass {
+    height: 34px;
+  }
+
+  #objective {
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+
+  .hud-right {
+    top: max(56px, calc(env(safe-area-inset-top) + 50px));
+    right: max(8px, env(safe-area-inset-right));
+    width: 170px;
+    transform: none;
+  }
+
+  .hud-players {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  #radar {
+    width: 96px;
+    height: 96px;
+  }
+
+  #hotbar {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    gap: 6px;
+  }
+
+  .slot {
+    width: 56px;
+    padding: 6px 4px 5px;
+  }
+
+  .slot svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .slot .name {
+    display: none;
+  }
+
+  .slot.active {
+    transform: translateY(-5px);
+  }
+
+  #toasts {
+    right: auto;
+    left: 50%;
+    top: 84px;
+    bottom: auto;
+    transform: translateX(-50%);
+    align-items: center;
+    width: min(420px, 60vw);
+  }
+
+  .toast {
+    font-size: 12px;
+    padding: 6px 10px;
+    max-width: 100%;
+    text-align: center;
+  }
+
+  #banner {
+    top: 30%;
+  }
+
+  #prompt {
+    font-size: 12px;
+    white-space: normal;
+    text-align: center;
+    width: min(360px, 70vw);
+  }
+}
+
+/* The radar moves off the left thumb on touch screens. */
+body.touch #radar {
+  left: auto;
+  bottom: auto;
+  right: max(12px, env(safe-area-inset-right));
+  top: max(56px, calc(env(safe-area-inset-top) + 50px));
+  width: 92px;
+  height: 92px;
+}
+
+body.touch .hud-right {
+  top: auto;
+  bottom: max(250px, calc(env(safe-area-inset-bottom) + 250px));
+}
+
+/* Short landscape phones: hide the crew list (the radar still shows everyone). */
+@media (max-height: 520px) {
+  body.touch .hud-right {
+    display: none;
+  }
+
+  #vitals .meta-row:last-child {
+    display: none;
+  }
+
+  #vitals {
+    width: 180px;
+  }
+
+  #vitals .bar.big {
+    height: 6px;
+  }
+}
+
+/* Portrait phones: stack the thumb controls above the build bar. */
+@media (orientation: portrait) and (max-width: 700px) {
+  body.touch .touch-pad {
+    bottom: max(84px, calc(env(safe-area-inset-bottom) + 76px));
+    transform: scale(0.85);
+    transform-origin: bottom right;
+  }
+
+  #compass-wrap {
+    top: auto;
+    bottom: calc(50% + 60px);
+    width: 70vw;
+  }
+
+  #compass {
+    display: none;
+  }
+
+  #vitals {
+    width: 160px;
+  }
+
+  body.touch #radar {
+    width: 80px;
+    height: 80px;
+  }
+}
+
+/* Menus, lobby and overlays on small or short screens. */
+@media (max-width: 900px), (max-height: 520px) {
+  .screen {
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    gap: 16px;
+  }
+
+  .card {
+    padding: 16px;
+    gap: 10px;
+  }
+
+  .card.wide {
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
+  }
+
+  h2 {
+    font-size: 24px;
+  }
+
+  .overlay {
+    padding: 12px;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(3, 6, 14, 0.75);
+  }
+
+  .help-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    font-size: 13px;
+  }
+
+  .victory-stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  .medal {
+    font-size: 44px;
+  }
+
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .cine-caption p {
+    font-size: 15px;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .screen {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    overflow: auto;
+  }
+
+  #menu .brand {
+    flex: 1;
+    text-align: left;
+  }
+
+  #menu .eyebrow,
+  #menu .chips {
+    justify-content: flex-start;
+  }
+
+  #menu h1 {
+    font-size: 54px;
+    margin: 8px 0 10px;
+  }
+
+  #menu .tagline {
+    font-size: 13px;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  #menu .chips {
+    margin-top: 10px;
+  }
+
+  #menu .chips li {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .menu-card,
+  .lobby-card {
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
+    flex: none;
+    width: min(360px, 48vw);
+  }
+
+  .menu-card .btn {
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+
+  .menu-card input {
+    padding: 8px 11px;
+  }
+
+  .lobby-brief {
+    font-size: 12px;
+  }
+
+  .splash h1 {
+    font-size: 64px;
+  }
+
+  #story-lines {
+    min-height: 0;
+  }
+
+  .story-inner {
+    gap: 12px;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    overflow: auto;
+  }
+
+  .briefing {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .briefing > div {
+    padding: 10px;
+  }
+
+  .briefing p {
+    font-size: 12px;
+  }
+
+  .cine-caption {
+    bottom: 14%;
+  }
+}
+
+/* Compact vitals on phones. */
+@media (max-width: 900px), (max-height: 520px) {
+  #vitals .vital-row span,
+  #vitals .label,
+  #vitals .meta-row span {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+  }
+
+  #vitals .vital-row b {
+    font-size: 16px;
+  }
+
+  #vitals .energy b {
+    font-size: 20px !important;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .menu-card .card-head,
+  .menu-card .divider {
+    display: none;
+  }
+
+  .menu-card {
+    gap: 8px;
+  }
+
+  .menu-card .swatch {
+    width: 26px;
+    height: 26px;
+  }
+
+  .menu-card .field {
+    gap: 4px;
+  }
+
+  #menu-status:empty {
+    display: none;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 700px) {
+  body.touch .hud-right {
+    display: none;
+  }
+}

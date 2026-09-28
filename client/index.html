@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>ARES: Last Colony</title>
     <meta name="description" content="ARES: Last Colony is a co-op 3D alien-invasion survival game. Earth has fallen; defend the last human colony on Mars against ten waves of the Xal with up to six friends." />
     <meta name="theme-color" content="#050814" />
@@ -21,8 +23,8 @@
     <section id="splash" class="splash">
       <p class="eyebrow"><span class="pulse"></span>Incoming transmission</p>
       <h1>Ares<span>Last colony</span></h1>
-      <button id="splash-go" class="btn primary big">▶ Click to start</button>
-      <p class="hint">Best with sound on · Desktop recommended</p>
+      <button id="splash-go" class="btn primary big"><span class="kb-only">▶ Click to start</span><span class="touch-only">▶ Tap to start</span></button>
+      <p class="hint">Best with sound on<span class="touch-only"> · Hold your phone sideways</span></p>
     </section>
 
     <!-- Opening cinematic -->
@@ -91,7 +93,7 @@
       <div class="card lobby-card">
         <p class="eyebrow">Room code</p>
         <button id="room-code" class="room-code" title="Copy invite link">—</button>
-        <p class="hint" id="copy-hint">Click the code to copy an invite link</p>
+        <p class="hint" id="copy-hint"><span class="kb-only">Click</span><span class="touch-only">Tap</span> the code to copy an invite link</p>
         <ul id="lobby-players" class="player-list"></ul>
         <div class="lobby-brief">
           <h3>Your mission</h3>
@@ -151,6 +153,7 @@
     </section>
 
     <div id="toasts" aria-live="polite"></div>
+    <div id="rotate-hint">↻ Turn your phone sideways for the best view</div>
 
     <!-- Opening story and mission briefing -->
     <section id="story" class="overlay story hidden">
@@ -159,8 +162,8 @@
         <ol id="story-lines"></ol>
         <div id="briefing" class="briefing hidden">
           <div><b>🎯 Goal</b><p>Keep the <strong>reactor</strong> alive for <strong>10 waves</strong>.</p></div>
-          <div><b>🔧 Build</b><p>Collect glowing <strong>power cells</strong>, then press <kbd>1</kbd>–<kbd>4</kbd> to build turrets and defences.</p></div>
-          <div><b>🔫 Fight</b><p><strong>Click</strong> to shoot aliens and drop pods. If you fall, you respawn at the reactor.</p></div>
+          <div><b>🔧 Build</b><p>Collect glowing <strong>power cells</strong>, then <span class="kb-only">press <kbd>1</kbd>–<kbd>4</kbd></span><span class="touch-only">tap a slot at the bottom</span> to build turrets and defences.</p></div>
+          <div><b>🔫 Fight</b><p><strong class="kb-only">Click</strong><strong class="touch-only">Hold Fire</strong> to shoot aliens and drop pods. If you fall, you respawn at the reactor.</p></div>
         </div>
         <div class="row">
           <button id="story-go" class="btn primary">Skip</button>
@@ -173,7 +176,19 @@
       <div class="card wide">
         <h2>Field manual</h2>
         <div class="help-grid">
-          <div>
+          <div class="touch-only">
+            <h3>Touch controls</h3>
+            <ul class="keys">
+              <li><kbd>Left thumb</kbd> Drag to move (push to the edge to run)</li>
+              <li><kbd>Right thumb</kbd> Drag to look around</li>
+              <li><kbd>Fire</kbd> Hold to shoot (aim assist helps)</li>
+              <li><kbd>Jump</kbd> Tap to jump, hold in the air for the jetpack</li>
+              <li><kbd>Run</kbd> Toggle sprint</li>
+              <li>Tap a slot at the bottom, then <kbd>Build</kbd> to place it · <kbd>✕</kbd> cancels</li>
+              <li><kbd>📍</kbd> Ping a spot for your team</li>
+            </ul>
+          </div>
+          <div class="kb-only">
             <h3>Controls</h3>
             <ul class="keys">
               <li><kbd>W A S D</kbd> Move</li>
@@ -199,7 +214,10 @@
             </ul>
           </div>
         </div>
-        <button id="help-close" class="btn primary">Back to the fight</button>
+        <div class="row">
+          <button id="help-close" class="btn primary">Back to the fight</button>
+          <button id="help-leave" class="btn ghost">Leave mission</button>
+        </div>
       </div>
     </section>
 

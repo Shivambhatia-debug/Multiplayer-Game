@@ -4,7 +4,7 @@
 import { mulberry32 } from './noise.js';
 import { createTerrain, BASE_DIR, PLANET_RADIUS as R } from './terrain.js';
 import { STRUCTURES, STRUCT_TYPES, ENEMIES, TUNING } from './defs.js';
-import { norm, dist, clamp, round, roundVec, randomDir, offsetDir } from './vec.js';
+import { norm, dist, clamp, round, roundVec, offsetDir } from './vec.js';
 import { createRuins, ruinColliders } from './ruins.js';
 
 const POD_ALTITUDE = 70;
@@ -93,7 +93,7 @@ export class World {
 
   spawnCell(anchors = []) {
     const anchor = anchors.length && this.rand() < 0.8 ? anchors[Math.floor(this.rand() * anchors.length)] : null;
-    const dir = anchor ? offsetDir(anchor, this.rand, 7, 34, R) : randomDir(this.rand);
+    const dir = anchor ? offsetDir(anchor, this.rand, 7, 34, R) : offsetDir(this.baseDir, this.rand, 10, 44, R);
     const id = this.nextId++;
     this.cells.set(id, { id, dir });
     this.version++;
@@ -332,7 +332,7 @@ export class World {
         if (e.cooldown <= 0) {
           e.cooldown = def.rate;
           this.damageTarget(e.target, def.dmg, events);
-          events.push({ e: 'spit', from: roundVec(e.dir, 3), to: roundVec(tdir, 3) });
+          events.push({ e: 'spit', from: roundVec(e.dir, 6), to: roundVec(tdir, 6) });
         }
       } else {
         this.damageTarget(e.target, def.dmg * dt, events);
@@ -462,8 +462,8 @@ export class World {
       v: this.version,
       seed: this.seed,
       n: this.nextId,
-      s: [...this.structures.values()].map((st) => [st.id, STRUCT_TYPES.indexOf(st.type), ...roundVec(st.dir, 4), Math.round(st.hp)]),
-      o: [...this.cells.values()].map((c) => [c.id, ...roundVec(c.dir, 4)]),
+      s: [...this.structures.values()].map((st) => [st.id, STRUCT_TYPES.indexOf(st.type), ...roundVec(st.dir, 6), Math.round(st.hp)]),
+      o: [...this.cells.values()].map((c) => [c.id, ...roundVec(c.dir, 6)]),
     };
   }
 
@@ -482,11 +482,11 @@ export class World {
       wa: this.waveActive ? 1 : 0,
       nw: round(this.nextWaveAt, 1),
       q: this.queue.length,
-      g: this.gates.map((d) => roundVec(d, 3)),
+      g: this.gates.map((d) => roundVec(d, 6)),
       c: this.counters,
       pl: [...this.players.entries()].map(([id, p]) => [id, Math.round(p.hp), p.dead ? 1 : 0, round(p.respawnAt, 1)]),
-      e: [...this.enemies.values()].map((e) => [e.id, e.kind, ...roundVec(e.dir, 4), e.hp, e.maxHp, e.attacking ? 1 : 0]),
-      m: [...this.pods.values()].map((p) => [p.id, ...roundVec(p.dir, 4), ...roundVec(p.from, 4), round(p.t0, 2), p.dur]),
+      e: [...this.enemies.values()].map((e) => [e.id, e.kind, ...roundVec(e.dir, 6), e.hp, e.maxHp, e.attacking ? 1 : 0]),
+      m: [...this.pods.values()].map((p) => [p.id, ...roundVec(p.dir, 6), ...roundVec(p.from, 6), round(p.t0, 2), p.dur]),
     };
   }
 

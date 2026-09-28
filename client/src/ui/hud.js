@@ -52,7 +52,7 @@ function alert(world, me) {
   if (me && me.hp < 35) return '❤ Low health! Stand near a Med Station or back off to recover.';
   if (world.pods.size) return '☄ Drop pods incoming. Shoot them before they land in the red rings!';
   if (!world.waveActive && world.wave === 0) {
-    if (!world.structures.size) return 'Grab the glowing power cells, then press 1 to build an Auto Turret near the reactor.';
+    if (!world.structures.size) return `Grab the glowing power cells, then ${document.body.classList.contains('touch') ? 'tap the turret slot' : 'press 1'} to build an Auto Turret near the reactor.`;
     return 'The first wave is coming. Build more defences around the reactor.';
   }
   if (!world.waveActive) return 'Wave cleared. Repair, collect power cells and build before the next wave.';
