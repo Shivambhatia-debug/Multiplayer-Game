@@ -37,6 +37,8 @@ export class LocalPlayer {
     this.vel = new THREE.Vector3();
     this.camDist = CAM_DIST;
     this.camRadius = 0;
+    /** Third-person distance; phones sit a little further back to see more of the fight. */
+    this.camBase = CAM_DIST;
   }
 
   /** Drops the pilot on one of the four roads next to the reactor, facing out toward the wall. */
@@ -182,7 +184,7 @@ export class LocalPlayer {
       .addScaledVector(this.dir, -Math.sin(this.pitch))
       .normalize();
     const probe = [0, 0, 0];
-    let d = CAM_DIST;
+    let d = this.camBase;
     for (; d > 1.2; d -= 0.4) {
       this.camPos.copy(target).addScaledVector(this.aim, -d);
       const len = this.camPos.length();

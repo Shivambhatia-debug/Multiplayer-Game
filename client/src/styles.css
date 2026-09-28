@@ -2402,3 +2402,111 @@ body.touch .hud-right {
     display: none;
   }
 }
+
+/* Resting stick hint (bottom-left) until the first touch. */
+.stick-hint {
+  position: absolute;
+  left: max(56px, calc(env(safe-area-inset-left) + 40px));
+  bottom: max(48px, calc(env(safe-area-inset-bottom) + 36px));
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.22);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.stick-hint span {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.stick-hint.off {
+  opacity: 0;
+}
+
+@media (orientation: portrait) and (max-width: 700px) {
+  .stick-hint {
+    bottom: max(110px, calc(env(safe-area-inset-bottom) + 100px));
+  }
+}
+
+.tbtn.auto {
+  opacity: 0.6;
+}
+
+.tbtn.auto.on {
+  opacity: 1;
+  border-color: var(--danger);
+  background: rgba(255, 90, 106, 0.28);
+}
+
+.look-speed {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.look-speed input {
+  flex: 1;
+  padding: 0;
+  accent-color: var(--accent);
+  height: 28px;
+}
+
+/* Intro cinematic on phones: smaller readouts, captions clear of the letterbox. */
+@media (max-width: 900px), (max-height: 520px) {
+  #intro-hud {
+    font-size: 10px;
+    left: 4vw;
+  }
+
+  .cine-caption b {
+    font-size: 11px;
+  }
+
+  .cine-caption p {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .cine-skip {
+    font-size: 11px;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 700px) {
+  .bar-top,
+  .bar-bottom {
+    height: 14vh;
+  }
+
+  .cine-caption {
+    bottom: calc(14vh + 16px);
+    width: 92vw;
+  }
+
+  #intro-hud {
+    top: calc(14vh + 12px);
+  }
+}
+
+@media (orientation: portrait) and (max-width: 700px) {
+  #toasts {
+    top: 238px;
+    width: 88vw;
+  }
+}

@@ -154,25 +154,47 @@ export class GameRenderer {
   }
 
   /**
-   * 'high' = shadows, MSAA, lamp lights and sharper resolution; 'low' = lighter settings for
-   * phones and weaker GPUs. On top of either, the resolution adapts to keep the frame rate up.
+   * Graphics presets. On top of any of them the resolution adapts to keep the frame rate up.
+   * - high: desktop GPUs. 4x MSAA, 2048 shadows, lamp lights, rock shadows.
+   * - medium: phones and laptops. Sharp resolution, 2x MSAA (nearly free on mobile tile
+   *   GPUs), soft 1024 shadows for depth, no lamp lights.
+   * - low: weakest devices. No shadows or MSAA, 1x resolution.
    */
   setQuality(q) {
+    if (!['high', 'medium', 'low'].includes(q)) q = 'high';
     this.quality = q;
-    const high = q === 'high';
-    this.basePixelRatio = high ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 1);
+    const dpr = window.devicePixelRatio || 1;
+    const preset = {
+      high: { ratio: Math.min(dpr, 1.5), samples: 4, shadows: true, shadowSize: 2048, bloom: 0.6, lights: true, rockShadows: true },
+      medium: { ratio: Math.min(dpr, 1.75), samples: 2, shadows: true, shadowSize: 1024, bloom: 0.4, lights: false, rockShadows: false },
+      low: { ratio: Math.min(dpr, 1), samples: 0, shadows: false, shadowSize: 1024, bloom: 0.35, lights: false, rockShadows: false },
+    }[q];
+    this.basePixelRatio = preset.ratio;
     this.resScale = 1;
-    this.renderer.shadowMap.enabled = high;
-    this.sun.castShadow = high;
+    this.perf.cooldown = 2;
+    this.renderer.shadowMap.enabled = preset.shadows;
+    this.sun.castShadow = preset.shadows;
+    if (this.sun.shadow.mapSize.x !== preset.shadowSize) {
+      this.sun.shadow.mapSize.set(preset.shadowSize, preset.shadowSize);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
     for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
-      rt.samples = high ? 4 : 0;
+      rt.samples = preset.samples;
       rt.dispose();
     }
-    this.bloomScale = high ? 0.6 : 0.35;
-    this.dust.lowQuality = !high;
+    // A tighter shadow area on smaller maps keeps shadows crisp.
+    const sc = this.sun.shadow.camera;
+    const half = q === 'high' ? 40 : 30;
+    sc.left = sc.bottom = -half;
+    sc.right = sc.top = half;
+    sc.updateProjectionMatrix();
+    this.bloomScale = preset.bloom;
+    this.dust.lowQuality = q === 'low';
     this.dust.setVisible(true);
-    this.ruinsView.lightsEnabled = high;
-    for (const r of this.terrainView.rocks) r.castShadow = high;
+    this.ruinsView.lightsEnabled = preset.lights;
+    this.rockShadows = preset.rockShadows;
+    for (const r of this.terrainView.rocks) r.castShadow = preset.rockShadows;
     this.scene.traverse((o) => {
       if (o.material) {
         const list = Array.isArray(o.material) ? o.material : [o.material];
@@ -309,6 +331,7 @@ export class GameRenderer {
     }
     this.terrainView.build(world);
     this.terrainView.paint(world);
+    for (const r of this.terrainView.rocks) r.castShadow = this.rockShadows !== false;
     this.terrainMesh = this.terrainView.mesh;
     this.ruinsView.build(world);
     if (this.reactor) this.entities.remove(this.reactor.obj);

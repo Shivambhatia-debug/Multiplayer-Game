@@ -1,7 +1,6 @@
 // On-screen controls for phones and tablets: a floating stick on the left half of the
 // screen, drag anywhere else to look, and thumb buttons for fire, jump, build and more.
 const STICK_RADIUS = 56;
-const LOOK_SPEED = 1.7;
 
 /** Keeps receiving a finger's events after it slides off the element (best effort). */
 function capture(target, id) {
@@ -26,11 +25,16 @@ export class TouchControls {
     this.stickId = null;
     this.lookId = null;
     this.firing = false;
+    this.lookSpeed = this.h.lookSpeed ?? 1.7;
+    this.autoFire = this.h.autoFire ?? true;
 
     this.layer = el('div', 'touch-layer');
     this.base = el('div', 'stick-base', '<i class="stick-knob"></i>');
     this.knob = this.base.firstChild;
     this.layer.appendChild(this.base);
+    // A faint resting stick shows new players where to put their thumb.
+    this.hint = el('div', 'stick-hint', '<span>Move</span>');
+    this.layer.appendChild(this.hint);
     root.prepend(this.layer);
 
     this.pad = el('div', 'touch-pad');
@@ -46,7 +50,10 @@ export class TouchControls {
     this.topBar = el('div', 'touch-top');
     this.helpBtn = el('button', 'tbtn mini', '?');
     this.muteBtn = el('button', 'tbtn mini', '🔊');
-    this.topBar.append(this.muteBtn, this.helpBtn);
+    this.autoBtn = el('button', 'tbtn mini auto', '🎯');
+    this.autoBtn.title = 'Auto-fire';
+    this.autoBtn.classList.toggle('on', this.autoFire);
+    this.topBar.append(this.autoBtn, this.muteBtn, this.helpBtn);
     root.appendChild(this.topBar);
 
     this.bindLayer();
@@ -65,6 +72,11 @@ export class TouchControls {
     this.tap(this.cancelBtn, () => this.h.onCancel());
     this.tap(this.salvageBtn, () => this.h.onSalvage());
     this.tap(this.helpBtn, () => this.h.onHelp());
+    this.tap(this.autoBtn, () => {
+      this.autoFire = !this.autoFire;
+      this.autoBtn.classList.toggle('on', this.autoFire);
+      this.h.onAutoFire?.(this.autoFire);
+    });
     this.tap(this.muteBtn, () => {
       this.muteBtn.textContent = this.h.onMute() ? '🔇' : '🔊';
     });
@@ -106,6 +118,7 @@ export class TouchControls {
         this.origin = { x: e.clientX, y: e.clientY };
         this.base.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
         this.base.classList.add('on');
+        this.hint.classList.add('off');
         this.moveStick(e);
       } else if (this.lookId === null) {
         this.lookId = e.pointerId;
@@ -115,7 +128,7 @@ export class TouchControls {
     layer.addEventListener('pointermove', (e) => {
       if (e.pointerId === this.stickId) this.moveStick(e);
       else if (e.pointerId === this.lookId) {
-        this.input.addLook((e.clientX - this.last.x) * LOOK_SPEED, (e.clientY - this.last.y) * LOOK_SPEED);
+        this.input.addLook((e.clientX - this.last.x) * this.lookSpeed, (e.clientY - this.last.y) * this.lookSpeed);
         this.last = { x: e.clientX, y: e.clientY };
       }
     });
@@ -124,6 +137,7 @@ export class TouchControls {
         this.stickId = null;
         this.input.stick.x = this.input.stick.y = 0;
         this.base.classList.remove('on');
+        this.hint.classList.remove('off');
         this.knob.style.transform = '';
       } else if (e.pointerId === this.lookId) {
         this.lookId = null;
@@ -168,6 +182,8 @@ export class TouchControls {
 
   reset() {
     this.firing = false;
+    this.lookSpeed = this.h.lookSpeed ?? 1.7;
+    this.autoFire = this.h.autoFire ?? true;
     this.stickId = null;
     this.lookId = null;
     this.input.stick.x = this.input.stick.y = 0;

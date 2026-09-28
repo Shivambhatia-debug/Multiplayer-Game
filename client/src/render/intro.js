@@ -2,6 +2,7 @@
 // fleet's arrival, Earth's destruction, and the last colony on Mars. Everything is
 // procedural and runs in its own scene; captions and letterboxing are DOM overlays.
 import * as THREE from 'three';
+import { fitFov } from './fov.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -294,8 +295,25 @@ export class Intro {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.camera.aspect = w / h;
+    // Phones get a wider lens (portrait even more) so Earth and the fleet fit on screen.
+    this.camera.fov = fitFov(h < 520 ? 54 : 45, w / h, 100);
     this.camera.updateProjectionMatrix();
+    this.pixelRatio = this.renderer.getPixelRatio();
+    this.composer.setPixelRatio(this.pixelRatio);
     this.composer.setSize(w, h);
+    // Bloom is soft, so it runs at a fraction of the resolution (cheap on phones).
+    this.bloom.setSize(Math.max(64, Math.round(w * this.pixelRatio * 0.5)), Math.max(64, Math.round(h * this.pixelRatio * 0.5)));
+  }
+
+  /** Matches the game's graphics preset: MSAA only where the GPU can afford it. */
+  setQuality(q) {
+    this.samples = q === 'high' ? 4 : q === 'medium' ? 2 : 0;
+    if (!this.composer) return;
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      rt.samples = this.samples;
+      rt.dispose();
+    }
+    this.resize();
   }
 
   build() {
@@ -304,10 +322,11 @@ export class Intro {
     scene.background = new THREE.Color(0x000000);
     this.scene = scene;
     this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 20000);
-    const target = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+    const target = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, { type: THREE.HalfFloatType, samples: this.samples ?? 4 });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(scene, this.camera));
-    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 1.1));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 1.1);
+    this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
     this.sunDir = new THREE.Vector3(-0.8, 0.25, 0.55).normalize();
@@ -540,6 +559,8 @@ export class Intro {
 
   update(dt) {
     if (!this.active) return;
+    // The game lowers the resolution on slow devices; follow it.
+    if (this.renderer.getPixelRatio() !== this.pixelRatio) this.resize();
     this.t += dt;
     const t = this.t;
     const u = this.earthUniforms;

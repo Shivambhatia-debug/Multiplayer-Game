@@ -16,6 +16,7 @@ import { Hud, toast, renderPlayerList, formatTime } from './ui/hud.js';
 import { Juice } from './ui/juice.js';
 import { Intro } from './render/intro.js';
 import { RESCUE } from './render/survivors.js';
+import { fitFov } from './render/fov.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -36,6 +37,31 @@ if (isTouch) {
   document.body.classList.add('touch');
   input.touchMode = true;
 }
+/** Short phone vibrations for hits, damage and kills (Android; ignored elsewhere). */
+function buzz(ms) {
+  if (!isTouch || !navigator.vibrate) return;
+  try {
+    navigator.vibrate(ms);
+  } catch {
+    // vibration blocked
+  }
+}
+
+const touchPrefs = (() => {
+  try {
+    return { lookSpeed: 1.7, autoFire: true, ...JSON.parse(localStorage.getItem('ares:touch') || '{}') };
+  } catch {
+    return { lookSpeed: 1.7, autoFire: true };
+  }
+})();
+function saveTouchPrefs() {
+  try {
+    localStorage.setItem('ares:touch', JSON.stringify(touchPrefs));
+  } catch {
+    // storage unavailable
+  }
+}
+
 const TAKE_CONTROL = isTouch ? 'Left thumb moves, right thumb looks. Tap ? for the field manual.' : 'Click the screen to take control. Press H for the field manual.';
 
 const NAMES = ['Nova', 'Kepler', 'Vega', 'Lyra', 'Atlas', 'Juno', 'Echo', 'Orion', 'Sol', 'Zephyr'];
@@ -471,6 +497,7 @@ function handleEvents(events) {
         renderer.flashEnemy(ev.id);
         if (ev.pid === meId) {
           juice.hitmarker();
+          buzz(8);
           sound.play('squish', 0.4);
         }
         break;
@@ -528,6 +555,7 @@ function handleEvents(events) {
 
 function onMyKill(label) {
   const streak = juice.kill();
+  buzz(streak >= 2 ? 45 : 20);
   juice.hitmarker();
   if (streak >= 2) sound.play('streak', streak);
   const names = { 2: 'Double kill', 3: 'Triple kill', 4: 'Quad kill' };
@@ -562,6 +590,24 @@ function findTarget(world) {
     consider(e.id, entry.obj.position.clone().addScaledVector(entry.up, lift), 0.17);
   }
   return best;
+}
+
+const aimV = new THREE.Vector3();
+const aimT = new THREE.Vector3();
+const aimR = new THREE.Vector3();
+function stickyAim(point, dt) {
+  const up = player.dir;
+  aimV.copy(point).sub(renderer.camera.position);
+  const vertical = aimV.dot(up);
+  aimT.copy(aimV).addScaledVector(up, -vertical);
+  const flat = aimT.length();
+  if (flat < 1e-3) return;
+  aimR.crossVectors(player.fwd, up).normalize();
+  const yaw = Math.atan2(aimT.dot(aimR), aimT.dot(player.fwd));
+  const k = 1 - Math.exp(-3.5 * dt);
+  player.fwd.applyAxisAngle(up, -yaw * k);
+  const pitch = -Math.atan2(vertical, flat);
+  player.pitch += (Math.max(-0.95, Math.min(1.25, pitch)) - player.pitch) * k;
 }
 
 function gunPosition() {
@@ -641,25 +687,31 @@ function setupControls() {
   $('intro-skip').addEventListener('click', () => intro.skip());
   $('intro-btn').addEventListener('click', startIntro);
   const qualityBtn = $('quality-btn');
+  const QUALITY_NAMES = { high: 'High', medium: 'Medium', low: 'Low' };
   const applyQuality = (q) => {
     renderer.setQuality(q);
-    qualityBtn.textContent = `Graphics: ${q === 'high' ? 'High' : 'Low'}`;
+    intro.setQuality(renderer.quality);
+    qualityBtn.textContent = `Graphics: ${QUALITY_NAMES[renderer.quality]}`;
     try {
-      localStorage.setItem('ares:quality', q);
+      localStorage.setItem('ares:quality2', renderer.quality);
     } catch {
       // storage unavailable
     }
   };
-  // Phones and small laptops start on Low; the choice is remembered.
-  const weak = isTouch || (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
-  let savedQuality = weak ? 'low' : 'high';
+  // Phones and small laptops start on Medium (Low on very weak ones); the choice is remembered.
+  const cores = navigator.hardwareConcurrency || 8;
+  const memory = navigator.deviceMemory || 8;
+  const weak = isTouch || cores <= 4 || memory <= 4;
+  let savedQuality = cores <= 2 || memory <= 2 ? 'low' : weak ? 'medium' : 'high';
   try {
-    savedQuality = localStorage.getItem('ares:quality') || savedQuality;
+    // v2 key: earlier builds saved Low for every phone.
+    savedQuality = localStorage.getItem('ares:quality2') || savedQuality;
   } catch {
     // storage unavailable
   }
   applyQuality(savedQuality);
-  qualityBtn.addEventListener('click', () => applyQuality(renderer.quality === 'high' ? 'low' : 'high'));
+  const NEXT = { high: 'medium', medium: 'low', low: 'high' };
+  qualityBtn.addEventListener('click', () => applyQuality(NEXT[renderer.quality]));
   $('ending-skip').addEventListener('click', finishEnding);
   input.onKey = (code) => {
     if (ending) {
@@ -722,6 +774,21 @@ function setupControls() {
       },
       onHelp: () => toggleHelp(),
       onMute: () => sound.toggleMute(),
+      onAutoFire: (on) => {
+        touchPrefs.autoFire = on;
+        saveTouchPrefs();
+        toast(on ? '🎯 Auto-fire on: aim at an alien and your rifle fires by itself' : '🎯 Auto-fire off: hold Fire to shoot', '', 2600);
+      },
+      lookSpeed: touchPrefs.lookSpeed,
+      autoFire: touchPrefs.autoFire,
+    });
+    player.camBase = 7;
+    const sens = $('look-speed');
+    sens.value = String(touchPrefs.lookSpeed);
+    sens.addEventListener('input', () => {
+      touchPrefs.lookSpeed = Number(sens.value);
+      touch.lookSpeed = touchPrefs.lookSpeed;
+      saveTouchPrefs();
     });
   }
   $('story-go').addEventListener('click', closeStory);
@@ -777,6 +844,7 @@ function updateVitals(world) {
   if (!me) return;
   if (me.hp < lastHp - 0.5 && !me.dead) {
     juice.hurt();
+    buzz(25);
     const now = performance.now();
     if (now - hurtSoundAt > 350) {
       hurtSoundAt = now;
@@ -789,6 +857,7 @@ function updateVitals(world) {
     selected = null;
     hud.setSelected(null);
     sound.play('down');
+    buzz([80, 60, 160]);
     $('downed').classList.remove('hidden');
   }
   if (me.dead) {
@@ -862,8 +931,11 @@ function updateGameplay(dt, world) {
   $('crosshair').classList.toggle('lock', !!target);
   if (touch) {
     touch.update({ building: selected && !dead, salvage: salvageLabel, dead });
-    // Holding Fire keeps shooting.
-    if (touch.firing && !selected && !dead && !helpOpen && !storyOpen) fire();
+    const free = !selected && !dead && !helpOpen && !storyOpen;
+    // Holding Fire keeps shooting; with auto-fire on, the rifle fires whenever it is on a target.
+    if (free && (touch.firing || (touch.autoFire && target))) fire();
+    // Sticky aim: the view drifts gently onto the locked target so thumbs don't have to be precise.
+    if (free && target) stickyAim(target.p, dt);
   }
 
   const fuel = $('fuel');
@@ -884,10 +956,9 @@ const menuHelper = new THREE.Vector3();
 const menuE1 = new THREE.Vector3();
 const menuE2 = new THREE.Vector3();
 
-/** A wider view in portrait so phones held upright still see enough of the battlefield. */
+/** A wider lens on narrow screens so phones held upright still see enough of the battlefield. */
 function baseFov() {
-  const aspect = window.innerWidth / window.innerHeight;
-  return aspect < 1 ? 80 : aspect < 1.4 ? 70 : 62;
+  return fitFov(62, window.innerWidth / window.innerHeight, 92);
 }
 let last = performance.now();
 
@@ -895,6 +966,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (intro.active) {
+    renderer.adaptResolution(dt);
     intro.update(dt);
     requestAnimationFrame(frame);
     return;
@@ -937,7 +1009,7 @@ function frame(now) {
     juice.update(dt, cam);
     radarTimer -= dt;
     if (radarTimer <= 0) {
-      radarTimer = 0.05;
+      radarTimer = isTouch ? 0.1 : 0.05;
       hud.drawRadar(world, player);
       hud.drawCompass(world, player);
     }
