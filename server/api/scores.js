@@ -5,7 +5,7 @@ import { cleanEntry, cleanMode, redisAdd, redisTop, upstashConfigured } from '..
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   if (!upstashConfigured()) {
-    sendJson(res, 503, { error: 'Leaderboard storage is not configured (set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN).' });
+    sendJson(res, 503, { error: 'Leaderboard storage is not configured (connect an Upstash Redis database to this project).' });
     return;
   }
   try {

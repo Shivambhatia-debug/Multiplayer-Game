@@ -1,6 +1,6 @@
 // Leaderboard helpers shared by the Vercel function and the standalone relay.
-// Scores live in Upstash Redis (free tier, via the Vercel Marketplace) when
-// UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set.
+// Scores live in Upstash Redis (free tier, via the Vercel Marketplace). Either naming works:
+// UPSTASH_REDIS_REST_URL / _TOKEN (upstash.com) or KV_REST_API_URL / _TOKEN (Vercel Storage).
 
 const MODE_RE = /^(easy|normal|nightmare|daily-\d{4}-\d{2}-\d{2})$/;
 const CLASSES = ['engineer', 'medic', 'heavy', 'scout'];
@@ -32,14 +32,17 @@ export function cleanEntry(body) {
   };
 }
 
+const restUrl = () => process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const restToken = () => process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+
 export function upstashConfigured() {
-  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  return !!(restUrl() && restToken());
 }
 
 async function upstash(commands) {
-  const res = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/pipeline`, {
+  const res = await fetch(`${restUrl()}/pipeline`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${restToken()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(commands),
   });
   if (!res.ok) throw new Error(`Upstash error ${res.status}`);
