@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>ARES: Last Colony</title>
+    <meta name="description" content="ARES: Last Colony is a co-op 3D alien-invasion survival game. Earth has fallen; defend the last human colony on Mars against ten waves of the Xal with up to six friends." />
+    <meta name="theme-color" content="#050814" />
+    <meta property="og:title" content="ARES: Last Colony" />
+    <meta property="og:description" content="Earth is gone. Hold the last colony on Mars against the Xal." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="vignette"></div>
+
+    <!-- Splash: a click is needed before the browser lets us play sound -->
+    <section id="splash" class="splash">
+      <p class="eyebrow"><span class="pulse"></span>Incoming transmission</p>
+      <h1>Ares<span>Last colony</span></h1>
+      <button id="splash-go" class="btn primary big"><span class="kb-only">▶ Click to start</span><span class="touch-only">▶ Tap to start</span></button>
+      <p class="hint">Best with sound on<span class="touch-only"> · Hold your phone sideways</span></p>
+    </section>
+
+    <!-- Opening cinematic -->
+    <section id="intro" class="cine hidden">
+      <div class="bar-top"></div>
+      <div class="bar-bottom"></div>
+      <div id="intro-hud"></div>
+      <div id="intro-caption" class="cine-caption"><b id="intro-year"></b><p id="intro-text"></p></div>
+      <button id="intro-skip" class="btn ghost small cine-skip">Skip intro ▸</button>
+      <div class="cine-progress"><i id="intro-progress"></i></div>
+      <div id="intro-fade"></div>
+    </section>
+
+    <!-- Ending cinematic (rescue or defeat) -->
+    <section id="ending" class="cine hidden">
+      <div class="bar-top"></div>
+      <div class="bar-bottom"></div>
+      <div id="ending-caption" class="cine-caption show"><b id="ending-year"></b><p id="ending-text"></p></div>
+      <button id="ending-skip" class="btn ghost small cine-skip">Skip ▸</button>
+    </section>
+
+    <!-- Title screen -->
+    <section id="menu" class="screen">
+      <div class="brand">
+        <p class="eyebrow"><span class="pulse"></span>Mars · Year 2086 · Last transmission</p>
+        <h1>Ares<span>Last colony</span></h1>
+        <p class="tagline">Earth is gone. The AI called SENTINEL invited the Xal, and they burned our home world. The last humans hide in the ruins of the Ares colony on Mars. Now the Xal are here too.</p>
+        <ul class="chips">
+          <li>1–6 players</li>
+          <li>Co-op survival</li>
+          <li>10 alien waves</li>
+          <li>Build defences</li>
+        </ul>
+      </div>
+      <div class="card menu-card">
+        <div class="card-head"><span>Survivor registration</span><i></i></div>
+        <label class="field">
+          <span>Call sign</span>
+          <input id="name-input" maxlength="16" autocomplete="off" placeholder="Nova" />
+        </label>
+        <div class="field">
+          <span>Suit colour</span>
+          <div id="swatches" class="swatches"></div>
+        </div>
+        <button id="create-btn" class="btn primary">Create room</button>
+        <div class="divider"><span>or join a crew</span></div>
+        <div class="join-row">
+          <input id="code-input" maxlength="5" autocomplete="off" placeholder="CODE" spellcheck="false" />
+          <button id="join-btn" class="btn">Join</button>
+        </div>
+        <button id="solo-btn" class="btn ghost">Play solo</button>
+        <div class="join-row">
+          <button id="intro-btn" class="btn ghost small">▶ Watch intro</button>
+          <button id="quality-btn" class="btn ghost small">Graphics: High</button>
+        </div>
+        <p id="menu-status" class="status" role="status"></p>
+      </div>
+      <footer class="menu-foot">
+        <span><kbd>WASD</kbd> move</span><span><kbd>Space</kbd> jump / jetpack</span><span><kbd>1–4</kbd> build</span
+        ><span><kbd>Click</kbd> shoot</span><span><kbd>Q</kbd> ping</span><span><kbd>H</kbd> help</span>
+      </footer>
+    </section>
+
+    <!-- Lobby -->
+    <section id="lobby" class="screen hidden">
+      <div class="card lobby-card">
+        <p class="eyebrow">Room code</p>
+        <button id="room-code" class="room-code" title="Copy invite link">—</button>
+        <p class="hint" id="copy-hint"><span class="kb-only">Click</span><span class="touch-only">Tap</span> the code to copy an invite link</p>
+        <ul id="lobby-players" class="player-list"></ul>
+        <div class="lobby-brief">
+          <h3>Your mission</h3>
+          <ol>
+            <li><b>Protect the reactor.</b> If it is destroyed, the colony falls.</li>
+            <li><b>Build defences</b> with energy from glowing power cells and alien kills.</li>
+            <li><b>Survive 10 waves</b> of the Xal until the evacuation beacon is charged.</li>
+          </ol>
+        </div>
+        <button id="launch-btn" class="btn primary">Launch mission</button>
+        <p id="lobby-status" class="status"></p>
+        <button id="leave-btn" class="btn ghost small">Leave room</button>
+      </div>
+    </section>
+
+    <!-- In-game HUD -->
+    <section id="hud" class="hidden">
+      <div id="compass-wrap">
+        <canvas id="compass" width="1280" height="96" aria-label="Compass"></canvas>
+        <div id="objective"></div>
+      </div>
+
+      <aside id="vitals" class="panel">
+        <div class="vital">
+          <div class="vital-row"><span>Pilot health</span><b id="hp-value">100</b></div>
+          <div class="bar big"><i id="hp-bar" class="hp"></i></div>
+        </div>
+        <div class="vital">
+          <div class="vital-row"><span>Reactor</span><b id="reactor-value">100%</b></div>
+          <div class="bar big"><i id="reactor-bar" class="reactor"></i></div>
+        </div>
+        <div class="energy-block">
+          <span class="label">Colony energy</span>
+          <div class="energy"><b id="energy-value">0</b></div>
+        </div>
+        <div class="meta">
+          <div class="meta-row"><span>Wave</span><b id="wave-value">0 / 10</b></div>
+          <div class="meta-row"><span id="wave-label">Next wave</span><b id="wave-status">—</b></div>
+          <div class="meta-row"><span>Room</span><b id="hud-room">—</b></div>
+        </div>
+      </aside>
+
+      <div class="hud-right">
+        <ul id="hud-players" class="hud-players panel"></ul>
+      </div>
+
+      <canvas id="radar" width="320" height="320" aria-label="Radar"></canvas>
+      <div id="fuel"><i></i></div>
+      <div id="floaters"></div>
+      <div id="banner"></div>
+      <div id="combo"></div>
+      <div id="downed" class="hidden"><b>You are down</b><span id="downed-timer">Respawning at the reactor…</span></div>
+      <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+      <div id="prompt"></div>
+      <div id="build-info" class="panel hidden"></div>
+      <div id="hotbar"></div>
+    </section>
+
+    <div id="toasts" aria-live="polite"></div>
+    <div id="rotate-hint">↻ Turn your phone sideways for the best view</div>
+
+    <!-- Opening story and mission briefing -->
+    <section id="story" class="overlay story hidden">
+      <div class="story-inner">
+        <p class="eyebrow">Incoming transmission · Ares Colony</p>
+        <ol id="story-lines"></ol>
+        <div id="briefing" class="briefing hidden">
+          <div><b>🎯 Goal</b><p>Keep the <strong>reactor</strong> alive for <strong>10 waves</strong>.</p></div>
+          <div><b>🔧 Build</b><p>Collect glowing <strong>power cells</strong>, then <span class="kb-only">press <kbd>1</kbd>–<kbd>4</kbd></span><span class="touch-only">tap a slot at the bottom</span> to build turrets and defences.</p></div>
+          <div><b>🔫 Fight</b><p><strong class="kb-only">Click</strong><strong class="touch-only">Hold Fire</strong> to shoot aliens and drop pods. If you fall, you respawn at the reactor.</p></div>
+        </div>
+        <div class="row">
+          <button id="story-go" class="btn primary">Skip</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Help -->
+    <section id="help" class="overlay hidden">
+      <div class="card wide">
+        <h2>Field manual</h2>
+        <div class="help-grid">
+          <div class="touch-only">
+            <h3>Touch controls</h3>
+            <ul class="keys">
+              <li><kbd>Left thumb</kbd> Drag to move (push to the edge to run)</li>
+              <li><kbd>Right thumb</kbd> Drag to look around</li>
+              <li><kbd>Fire</kbd> Hold to shoot (aim assist helps)</li>
+              <li><kbd>Jump</kbd> Tap to jump, hold in the air for the jetpack</li>
+              <li><kbd>Run</kbd> Toggle sprint</li>
+              <li>Tap a slot at the bottom, then <kbd>Build</kbd> to place it · <kbd>✕</kbd> cancels</li>
+              <li><kbd>📍</kbd> Ping a spot for your team · <kbd>🎯</kbd> Auto-fire on/off</li>
+            </ul>
+            <label class="look-speed">
+              <span>Look speed</span>
+              <input id="look-speed" type="range" min="0.6" max="3.2" step="0.1" value="1.7" />
+            </label>
+          </div>
+          <div class="kb-only">
+            <h3>Controls</h3>
+            <ul class="keys">
+              <li><kbd>W A S D</kbd> Move</li>
+              <li><kbd>Mouse</kbd> Look (click to lock)</li>
+              <li><kbd>Shift</kbd> Sprint · <kbd>Space</kbd> Jump</li>
+              <li>Hold <kbd>Space</kbd> in the air: jetpack</li>
+              <li><kbd>1</kbd>–<kbd>4</kbd> Pick a defence to build</li>
+              <li><kbd>Click</kbd> Shoot / place the selected build</li>
+              <li><kbd>Right click</kbd> Cancel build</li>
+              <li><kbd>X</kbd> Salvage nearby structure</li>
+              <li><kbd>Q</kbd> Ping a spot for your team</li>
+              <li><kbd>M</kbd> Mute · <kbd>H</kbd> Help</li>
+            </ul>
+          </div>
+          <div>
+            <h3>How to survive</h3>
+            <ul>
+              <li><b>The reactor</b> is the heart of the colony. If it hits 0%, the game is over. It repairs slowly between waves.</li>
+              <li><b>Energy</b> is shared. Walk into glowing blue <b>power cells</b>, kill aliens and clear waves to earn it.</li>
+              <li><b>Auto Turrets</b> shoot on their own. <b>Generators</b> make energy. <b>Med Stations</b> heal you. <b>Barricades</b> hold aliens back.</li>
+              <li><b>The Xal:</b> Drones are fast, Brutes are tanks, Spitters shoot acid from range. Shoot <b>drop pods</b> before they land or they release more drones.</li>
+              <li>The <b>compass</b> and <b>radar</b> show aliens (green), pods (red), power cells (blue) and the reactor (gold).</li>
+            </ul>
+          </div>
+        </div>
+        <div class="row">
+          <button id="help-close" class="btn primary">Back to the fight</button>
+          <button id="help-leave" class="btn ghost">Leave mission</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Victory -->
+    <section id="victory" class="overlay hidden">
+      <div class="card wide center">
+        <p class="eyebrow" id="victory-eyebrow">Planet stabilized</p>
+        <h2 id="victory-title">It breathes.</h2>
+        <div id="medal" class="medal"></div>
+        <div id="victory-stats" class="victory-stats"></div>
+        <div class="row">
+          <button id="again-btn" class="btn primary">Terraform a new planet</button>
+          <button id="menu-btn" class="btn ghost">Main menu</button>
+        </div>
+        <p id="victory-wait" class="status"></p>
+      </div>
+    </section>
+
+    <div id="loading" class="loading"><div class="spinner"></div><p>Generating planet…</p></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
