@@ -581,9 +581,20 @@ export class GameRenderer {
         this.fx.emit(nozzle, down, 0xff9a3a, 2, 0.35, 1.5);
         this.fx.emit(nozzle, down, 0x7cf7d4, 1, 0.25, 1);
       }
-      const moving = p.pose.a === 1;
-      a.walk += dt * (moving ? 9 : 1.5);
-      const state = p.pose.a >= 2 ? 'air' : moving ? 'walk' : 'idle';
+      // Drive the legs from how fast the avatar actually moves over the ground, so the
+      // feet plant instead of sliding. Metres per radian of gait phase come from the
+      // leg length (~0.95 m) and stride angle: walk 0.55 rad, run 0.85 rad.
+      if (!a.prev) a.prev = a.obj.position.clone();
+      const moved = teleport ? 0 : tmpV3.subVectors(a.obj.position, a.prev).addScaledVector(a.dir, -tmpV3.dot(a.dir)).length();
+      a.prev.copy(a.obj.position);
+      const speedNow = dt > 0 ? moved / dt : 0;
+      a.speed = (a.speed || 0) + (speedNow - (a.speed || 0)) * (1 - Math.exp(-12 * dt));
+      let state = 'idle';
+      if (p.pose.a >= 2) state = 'air';
+      else if (a.speed > 3.2) state = 'run';
+      else if (a.speed > 0.35) state = 'walk';
+      const perRadian = state === 'run' ? 0.45 : 0.32;
+      a.walk += state === 'walk' || state === 'run' ? (dt * a.speed) / perRadian : dt * 1.5;
       if (!a.board) animateHuman(a.rig, state, a.walk, true);
     }
     for (const [id, a] of this.avatars) {

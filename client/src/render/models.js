@@ -428,7 +428,8 @@ export function animateHuman(rig, state, t, aiming = false) {
   knees[1].rotation.x = Math.max(0, Math.cos(t)) * stride * 1.2;
   swing = stride * 0.8;
   hips.position.y = 0.95 + (stride ? Math.abs(Math.cos(t)) * 0.04 : Math.sin(t * 0.25) * 0.005);
-  torso.rotation.set(stride * 0.12, 0, 0);
+  // Lean into a run.
+  torso.rotation.set(stride * (state === 'run' ? 0.2 : 0.12), 0, 0);
   head.rotation.set(0, 0, 0);
   arms[0].rotation.set(-s * swing, 0, -0.12);
   arms[1].rotation.set(s * swing, 0, 0.12);

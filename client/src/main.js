@@ -334,7 +334,17 @@ function onPhase(phase) {
   }
 }
 
+// iPhone browsers cannot go fullscreen from a web page; a home-screen shortcut can.
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let iosTipShown = false;
+function iosFullscreenTip() {
+  if (!isIOS || navigator.standalone || iosTipShown) return;
+  iosTipShown = true;
+  setTimeout(() => toast('📱 Fullscreen on iPhone: open in Safari → Share → Add to Home Screen, then play from the icon.', 'warn', 7000), 6000);
+}
+
 function enterGame() {
+  iosFullscreenTip();
   showScreen('game');
   player.spawn(session.world);
   wasDead = false;

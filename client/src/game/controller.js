@@ -4,8 +4,8 @@ import * as THREE from 'three';
 import { colonyFrame, localToDir } from '../sim/ruins.js';
 import { PLANET_RADIUS } from '../sim/terrain.js';
 
-const WALK = 7.5;
-const SPRINT = 12;
+const WALK = 6;
+const SPRINT = 9.5;
 const JUMP = 8;
 const GRAVITY = 21;
 const JET_THRUST = 36;
