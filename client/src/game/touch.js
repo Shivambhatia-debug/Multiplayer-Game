@@ -44,16 +44,19 @@ export class TouchControls {
     this.pingBtn = el('button', 'tbtn mini ping', '📍');
     this.cancelBtn = el('button', 'tbtn mini cancel hidden', '✕');
     this.salvageBtn = el('button', 'tbtn wide salvage hidden', '<span>Salvage</span>');
-    this.pad.append(this.fireBtn, this.jumpBtn, this.sprintBtn, this.pingBtn, this.cancelBtn, this.salvageBtn);
+    this.grenadeBtn = el('button', 'tbtn mini grenade', '💣');
+    this.pad.append(this.fireBtn, this.jumpBtn, this.sprintBtn, this.pingBtn, this.cancelBtn, this.salvageBtn, this.grenadeBtn);
     root.appendChild(this.pad);
 
     this.topBar = el('div', 'touch-top');
     this.helpBtn = el('button', 'tbtn mini', '?');
     this.muteBtn = el('button', 'tbtn mini', '🔊');
     this.autoBtn = el('button', 'tbtn mini auto', '🎯');
+    this.armoryBtn = el('button', 'tbtn mini', '⬆');
+    this.emoteBtn = el('button', 'tbtn mini', '👋');
     this.autoBtn.title = 'Auto-fire';
     this.autoBtn.classList.toggle('on', this.autoFire);
-    this.topBar.append(this.autoBtn, this.muteBtn, this.helpBtn);
+    this.topBar.append(this.emoteBtn, this.armoryBtn, this.autoBtn, this.muteBtn, this.helpBtn);
     root.appendChild(this.topBar);
 
     this.bindLayer();
@@ -72,6 +75,9 @@ export class TouchControls {
     this.tap(this.cancelBtn, () => this.h.onCancel());
     this.tap(this.salvageBtn, () => this.h.onSalvage());
     this.tap(this.helpBtn, () => this.h.onHelp());
+    this.tap(this.grenadeBtn, () => this.h.onGrenade?.());
+    this.tap(this.armoryBtn, () => this.h.onArmory?.());
+    this.tap(this.emoteBtn, () => this.h.onEmote?.());
     this.tap(this.autoBtn, () => {
       this.autoFire = !this.autoFire;
       this.autoBtn.classList.toggle('on', this.autoFire);
@@ -168,6 +174,13 @@ export class TouchControls {
     this.input.stick.x = d2 ? (dx / d2) * mag : 0;
     this.input.stick.y = d2 ? (dy / d2) * mag : 0;
     this.base.classList.toggle('run', mag > 0.93);
+  }
+
+  /** Shows the grenade cooldown in seconds (0 = ready). */
+  setGrenade(wait) {
+    const text = wait > 0 ? String(wait) : '💣';
+    if (this.grenadeBtn.textContent !== text) this.grenadeBtn.textContent = text;
+    this.grenadeBtn.classList.toggle('cooling', wait > 0);
   }
 
   /** Called every frame with what the pilot can do right now. */

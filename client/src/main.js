@@ -1,8 +1,8 @@
 import './styles.css';
 import * as THREE from 'three';
 import { GameRenderer } from './render/scene.js';
-import { World, podPos } from './sim/world.js';
-import { STRUCTURES, STRUCT_TYPES, PLAYER_COLORS, TUNING, ENEMIES, STORY, RADIO } from './sim/defs.js';
+import { World, podPos, dailySeed, dailyKey } from './sim/world.js';
+import { STRUCTURES, STRUCT_TYPES, PLAYER_COLORS, TUNING, STORY, RADIO, CLASSES, CLASS_IDS, DIFFICULTY, UPGRADES, LOGS } from './sim/defs.js';
 import { PLANET_RADIUS as R } from './sim/terrain.js';
 import { dist } from './sim/vec.js';
 import { Session } from './net/session.js';
@@ -18,6 +18,7 @@ import { Intro } from './render/intro.js';
 import { RESCUE } from './render/survivors.js';
 import { fitFov } from './render/fov.js';
 import { XAL_CHEST } from './render/models.js';
+import { Progress, ACHIEVEMENTS, scoreFor, modeFor, submitScore, fetchBoard } from './ui/progress.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -28,6 +29,7 @@ const hud = new Hud();
 const juice = new Juice();
 const intro = new Intro(renderer.renderer, sound);
 const player = new LocalPlayer();
+const progress = new Progress();
 const demo = World.demo();
 const raycaster = new THREE.Raycaster();
 
@@ -91,7 +93,18 @@ let lastHp = TUNING.playerHp;
 let hurtSoundAt = 0;
 let playersTimer = 0;
 let touch = null;
+let armoryOpen = false;
+let recordsOpen = false;
+let timeScale = 1;
+let slowMoUntil = 0;
+let armoryTimer = 0;
+let skipSpawn = false;
+let mission = null;
 const pendingCells = new Map();
+const pendingLogs = new Map();
+const emotes = new Map();
+const HELMETS = [['bubble', 'Bubble'], ['visor', 'Visor'], ['tactical', 'Tactical']];
+const PATTERNS = [['plain', 'Plain'], ['stripes', 'Stripes'], ['camo', 'Camo']];
 
 // ---------------------------------------------------------------- profile
 
@@ -102,9 +115,16 @@ function loadProfile() {
   } catch {
     saved = {};
   }
+  const pick = (value, list, fallback) => (list.includes(value) ? value : fallback);
   return {
     name: typeof saved.name === 'string' && saved.name ? saved.name : NAMES[Math.floor(Math.random() * NAMES.length)],
     color: PLAYER_COLORS.includes(saved.color) ? saved.color : PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)],
+    cls: pick(saved.cls, CLASS_IDS, 'engineer'),
+    diff: pick(saved.diff, Object.keys(DIFFICULTY), 'normal'),
+    style: {
+      helmet: pick(saved.style?.helmet, ['bubble', 'visor', 'tactical'], 'bubble'),
+      pattern: pick(saved.style?.pattern, ['plain', 'stripes', 'camo'], 'plain'),
+    },
   };
 }
 
@@ -117,6 +137,68 @@ function saveProfile() {
 }
 
 // ---------------------------------------------------------------- menu
+
+/** A row of toggle chips; calls `onPick(value)` and keeps the active one highlighted. */
+function chipRow(el, options, current, onPick) {
+  el.innerHTML = options.map(([value, label]) => `<button data-v="${value}">${label}</button>`).join('');
+  const mark = (v) => el.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.v === v));
+  mark(current);
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    mark(b.dataset.v);
+    onPick(b.dataset.v);
+    sound.unlock();
+    sound.play('ui');
+  });
+  return mark;
+}
+
+function classCards(el, onPick) {
+  el.innerHTML = CLASS_IDS.map((id) => `<button data-v="${id}" title="${CLASSES[id].desc}"><i>${CLASSES[id].icon}</i>${CLASSES[id].name}</button>`).join('');
+  const mark = (v) => el.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.v === v));
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    onPick(b.dataset.v);
+    sound.unlock();
+    sound.play('ui');
+  });
+  return mark;
+}
+
+const classMarks = [];
+function setClass(cls) {
+  profile.cls = cls;
+  saveProfile();
+  player.cls = cls;
+  classMarks.forEach((m) => m(cls));
+  $('class-desc').textContent = CLASSES[cls].desc;
+  hud.setClass(cls);
+  if (session) session.updateMe({ cls });
+}
+
+function setupPickers() {
+  classMarks.push(classCards($('class-pick'), setClass), classCards($('lobby-class-pick'), setClass));
+  setClass(profile.cls);
+  chipRow($('helmet-pick'), HELMETS, profile.style.helmet, (v) => {
+    profile.style = { ...profile.style, helmet: v };
+    saveProfile();
+  });
+  chipRow($('pattern-pick'), PATTERNS, profile.style.pattern, (v) => {
+    profile.style = { ...profile.style, pattern: v };
+    saveProfile();
+  });
+  chipRow(
+    $('diff-pick'),
+    Object.entries(DIFFICULTY).map(([id, d]) => [id, d.name]),
+    profile.diff,
+    (v) => {
+      profile.diff = v;
+      saveProfile();
+    },
+  );
+}
 
 function setupMenu() {
   const nameInput = $('name-input');
@@ -140,6 +222,8 @@ function setupMenu() {
   });
   markSwatch();
 
+  setupPickers();
+
   const codeInput = $('code-input');
   codeInput.addEventListener('input', () => {
     codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
@@ -158,6 +242,7 @@ function setupMenu() {
     startSession({ code });
   });
   $('solo-btn').addEventListener('click', () => startSession({ solo: true }));
+  $('daily-btn').addEventListener('click', () => startSession({ solo: true, daily: true }));
 
   const fromUrl = new URLSearchParams(location.search).get('room');
   if (fromUrl) {
@@ -207,13 +292,13 @@ function goFullscreen() {
   }
 }
 
-async function startSession({ solo = false, creating = false, code = '' }) {
+async function startSession({ solo = false, creating = false, code = '', daily = false }) {
   goFullscreen();
   sound.unlock();
   sound.play('ui');
   setBusy(true);
   try {
-    const me = { id: meId, name: profile.name, color: profile.color };
+    const me = { id: meId, name: profile.name, color: profile.color, cls: profile.cls, style: profile.style };
     let transport;
     if (solo) {
       transport = new LocalTransport();
@@ -241,7 +326,9 @@ async function startSession({ solo = false, creating = false, code = '' }) {
     menuStatus('');
     if (solo) {
       history.replaceState(null, '', location.pathname);
-      s.act({ k: 'start' });
+      // The daily challenge is the same planet and wave order for everyone today.
+      if (daily) s.world.reset(dailySeed(), 'lobby');
+      s.act({ k: 'start', diff: daily ? 'normal' : profile.diff, daily });
     } else {
       history.replaceState(null, '', `${location.pathname}?room=${code}`);
       showLobby();
@@ -286,6 +373,10 @@ function wireSession(s) {
     toast(`📍 ${s.memberName(ping.from)} pinged a location`);
   };
   s.onError = (msg) => toast(msg, 'bad', 5000);
+  s.onEmote = (em) => {
+    emotes.set(em.from, { kind: em.e === 'cheer' ? 'cheer' : 'wave', at: renderer.clock });
+    toast(`${em.e === 'cheer' ? '🙌' : '👋'} ${s.memberName(em.from)}`, '', 1600);
+  };
   s.onHostChange = (name, isMe) => toast(isMe ? '👑 You are now the host.' : `👑 ${name} is now the host.`, 'warn');
 }
 
@@ -301,12 +392,13 @@ function updateLobbyButton() {
   btn.disabled = !session.isHost;
   btn.textContent = session.isHost ? 'Launch mission' : 'Waiting for host to launch…';
   $('lobby-status').textContent = session.members.length < 2 && session.isHost ? 'Share the code — or launch now and friends can drop in later.' : '';
+  $('lobby-diff').textContent = session.isHost ? `Difficulty: ${DIFFICULTY[profile.diff].name} (change it on the main menu)` : 'The host picks the difficulty.';
 }
 
 function setupLobby() {
   $('launch-btn').addEventListener('click', () => {
     sound.play('ui');
-    session?.act({ k: 'start' });
+    session?.act({ k: 'start', diff: profile.diff });
   });
   $('leave-btn').addEventListener('click', leaveSession);
   $('room-code').addEventListener('click', async () => {
@@ -347,11 +439,15 @@ function iosFullscreenTip() {
 function enterGame() {
   iosFullscreenTip();
   showScreen('game');
+  player.cls = profile.cls;
   player.spawn(session.world);
   wasDead = false;
   lastHp = TUNING.playerHp;
+  // Per-mission tracking for achievements.
+  mission = { downs: 0, revives: 0, turrets: 0, scored: false, logIds: new Set() };
   $('downed').classList.add('hidden');
-  $('hud-room').textContent = session.solo ? 'Solo' : session.room;
+  const w = session.world;
+  $('hud-room').textContent = `${w.daily ? 'Daily' : session.solo ? 'Solo' : session.room} · ${DIFFICULTY[w.diff].name}`;
   if (!storySeen) showStory();
   else toast(TAKE_CONTROL, '', 5000);
 }
@@ -470,6 +566,7 @@ function handleEvents(events) {
     switch (ev.e) {
       case 'build': {
         const def = STRUCTURES[ev.type];
+        if (ev.type === 'turret' && mission) mission.turrets++;
         renderer.sparkle(ev.dir, def.color);
         sound.play('build', proximity(ev.dir));
         if (ev.pid !== meId) toast(`${ev.by} built a ${def.name}`);
@@ -479,7 +576,7 @@ function handleEvents(events) {
         renderer.sparkle(ev.dir, 0x5fc8ff, 0);
         if (ev.pid === meId) {
           sound.play('collect');
-          juice.float(surfacePoint(ev.dir, 2.5), `+${TUNING.cellValue}⚡`, '#8fd8ff');
+          juice.float(surfacePoint(ev.dir, 2.5), `+${ev.value || TUNING.cellValue}⚡`, '#8fd8ff');
         }
         break;
       case 'podshot': {
@@ -487,7 +584,10 @@ function handleEvents(events) {
         const p = new THREE.Vector3(...ev.pos);
         sound.play('hit', proximity(p.clone().normalize().toArray()));
         juice.float(p, `+${TUNING.podBounty}⚡`, '#7dff5a');
-        if (ev.pid === meId) onMyKill('Pod destroyed');
+        if (ev.pid === meId) {
+          onMyKill('Pod destroyed');
+          if (progress.bump('pods') >= 10) achieve('pods10');
+        }
         else toast(`☄ ${ev.by} shot down a drop pod`);
         break;
       }
@@ -501,7 +601,10 @@ function handleEvents(events) {
         const p = new THREE.Vector3(...ev.pos);
         sound.play('squish', proximity(p.clone().normalize().toArray()));
         if (ev.bounty) juice.float(p, `+${ev.bounty}⚡`, '#7dff5a');
-        if (ev.pid === meId) onMyKill(ev.kind === 1 ? 'Juggernaut down' : null);
+        if (ev.pid === meId) {
+          onMyKill(ev.kind === 1 ? 'Juggernaut down' : null);
+          if (ev.kind === 1 && progress.bump('juggernauts') >= 10) achieve('jugg10');
+        }
         break;
       }
       case 'hurt':
@@ -522,9 +625,10 @@ function handleEvents(events) {
         toast(`💥 The Xal destroyed a ${STRUCTURES[ev.type].name}!`, 'bad');
         break;
       case 'wave': {
-        const line = RADIO[(ev.n - 1) % RADIO.length];
-        juice.banner(`Wave ${ev.n}`, '#ff5a6a', `${ev.count} hostiles incoming`, 3000);
+        const line = ev.boss ? 'Massive contact in orbit. It is a mothership! Dodge the green rings and shoot the core!' : RADIO[(ev.n - 1) % RADIO.length];
+        juice.banner(`Wave ${ev.n}`, '#ff5a6a', ev.boss ? 'MOTHERSHIP INBOUND' : `${ev.count} hostiles incoming`, 3000);
         toast(`📻 CMDR. REYES: ${line}`, 'warn', 7000);
+        sound.say(line);
         sound.play('swarm');
         sound.play('alarm');
         break;
@@ -532,9 +636,72 @@ function handleEvents(events) {
       case 'waveclear':
         juice.banner(`Wave ${ev.n} cleared`, '#7cf7d4', `+${ev.bonus}⚡ · Beacon ${Math.round((ev.n / TUNING.waves) * 100)}% charged`);
         sound.play('bounty');
+        slowMo(0.9);
+        break;
+      case 'boss':
+        sound.play('boss');
+        juice.banner('Xal Mothership', '#7dff4a', 'Shoot the glowing core underneath', 3500);
+        break;
+      case 'strike':
+        renderer.strike(ev.dir, session.world);
+        sound.play('strike', proximity(ev.dir));
+        break;
+      case 'bosshit':
+        if (ev.pid === meId) juice.hitmarker();
+        break;
+      case 'bossdown':
+        renderer.bossDown(ev.pos);
+        sound.play('explosion');
+        slowMo(1.6);
+        juice.banner('Mothership destroyed!', '#7dff4a', `+80⚡ · ${ev.by}`, 3200);
+        sound.say('The mothership is going down! Outstanding work, pilots!');
+        achieve('boss');
+        break;
+      case 'grenade':
+        renderer.grenade(ev.dir);
+        sound.play('grenade', proximity(ev.dir));
+        break;
+      case 'upgraded':
+        if (ev.pid === meId) {
+          sound.play('upgrade');
+          toast(`⬆ ${UPGRADES[ev.what].name} level ${ev.level}`);
+          if (ev.level >= UPGRADES[ev.what].costs.length) achieve('upgrade');
+          renderArmory();
+        } else toast(`⬆ ${ev.by} upgraded ${UPGRADES[ev.what].name}`);
+        break;
+      case 'log': {
+        const [title, text] = LOGS[ev.id] || ['', ''];
+        sound.play('log');
+        if (ev.pid === meId) showLog(title, text);
+        else toast(`📡 ${ev.by} recovered a data log: ${title}`, 'warn', 5000);
+        if (mission) {
+          for (const id of session.world.logs) mission.logIds.add(id);
+          mission.logIds.add(ev.id);
+          if (mission.logIds.size >= LOGS.length) achieve('logs');
+        }
+        break;
+      }
+      case 'storm':
+        juice.banner('Dust storm', '#ffb14a', 'Visibility dropping. Xal ambush likely!', 3200);
+        sound.say('Dust storm rolling in. Watch your radar, they will use it for cover.');
+        break;
+      case 'stormend':
+        if (!isDead()) achieve('storm');
+        toast('🌤 The storm is passing.');
+        break;
+      case 'revived':
+        sound.play('revive');
+        if (ev.id === meId) {
+          skipSpawn = true;
+          toast(`✚ ${session.memberName(ev.by)} revived you!`);
+        } else if (ev.by === meId) {
+          toast(`✚ You revived ${session.memberName(ev.id)}!`);
+          if (mission && ++mission.revives >= 3) achieve('medic3');
+        } else toast(`✚ ${session.memberName(ev.by)} revived ${session.memberName(ev.id)}`);
         break;
       case 'down':
-        if (ev.id !== meId) toast(`☠ ${session.memberName(ev.id)} is down!`, 'bad');
+        if (ev.id !== meId) toast(`☠ ${session.memberName(ev.id)} is down! Stand next to them to revive.`, 'bad');
+        else if (mission) mission.downs++;
         break;
       case 'respawn':
         if (ev.id !== meId) toast(`${session.memberName(ev.id)} is back in the fight.`);
@@ -562,6 +729,18 @@ function handleEvents(events) {
       default:
     }
   }
+}
+
+function achieve(id) {
+  const def = progress.unlock(id);
+  if (!def) return;
+  sound.play('achievement');
+  juice.banner(`${def.icon} ${def.name}`, '#ffd166', 'Achievement unlocked', 2600);
+}
+
+/** Slows the world's visuals for a moment (the simulation keeps its pace). */
+function slowMo(seconds = 0.9) {
+  slowMoUntil = performance.now() + seconds * 1000;
 }
 
 function onMyKill(label) {
@@ -600,7 +779,74 @@ function findTarget(world) {
     const lift = XAL_CHEST[e.kind];
     consider(e.id, entry.obj.position.clone().addScaledVector(entry.up, lift), 0.17);
   }
+  // The mothership's core is a big target; it only counts once it has descended.
+  const core = world.boss && world.simTime - world.boss.t0 > 5 ? renderer.bossCore(world) : null;
+  if (core) consider('boss', core, 0.3);
   return best;
+}
+
+function me() {
+  return session?.world.players.get(meId);
+}
+
+/** Throws a plasma grenade at the target under the crosshair, or 12 m ahead. */
+function throwGrenade() {
+  if (!session || isDead() || session.world.phase !== 'play') return;
+  const p = me();
+  if (p && session.world.simTime < p.grenadeAt) {
+    toast(`💣 Grenade recharging (${Math.ceil(p.grenadeAt - session.world.simTime)}s)`, '', 1500);
+    return;
+  }
+  const target = findTarget(session.world);
+  let dir;
+  if (target && target.id !== 'boss') dir = target.p.clone().normalize().toArray();
+  else dir = player.dir.clone().multiplyScalar(R).addScaledVector(player.fwd, 12).normalize().toArray();
+  session.act({ k: 'grenade', dir });
+}
+
+function emote(kind) {
+  if (!session) return;
+  emotes.set(meId, { kind, at: renderer.clock });
+  if (!session.solo) session.sendEmote({ e: kind });
+}
+
+function showLog(title, text) {
+  $('log-title').textContent = title;
+  $('log-text').textContent = text;
+  const card = $('log-card');
+  card.classList.remove('hidden');
+  clearTimeout(showLog.timer);
+  showLog.timer = setTimeout(() => card.classList.add('hidden'), 9000);
+}
+
+// ---------------------------------------------------------------- armory
+
+function renderArmory() {
+  if (!session) return;
+  const p = me();
+  const energy = session.world.energy;
+  $('armory-list').innerHTML = Object.entries(UPGRADES)
+    .map(([id, u]) => {
+      const level = p?.up[id] || 0;
+      const max = level >= u.costs.length;
+      const cost = u.costs[level];
+      const pips = u.costs.map((_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
+      return `<div class="upgrade"><b>${u.name}</b><p>${u.desc}</p><div class="pips">${pips}</div>
+        <button class="btn ${max ? 'ghost' : 'primary'} small" data-up="${id}" ${max || energy < cost ? 'disabled' : ''}>${max ? 'Maxed' : `Buy · ⚡${cost}`}</button></div>`;
+    })
+    .join('');
+  const c = CLASSES[profile.cls];
+  $('armory-class').innerHTML = `<b>${c.icon} ${c.name}</b> ${c.desc} <span class="hint">Change class in the lobby or main menu.</span>`;
+}
+
+function toggleArmory(open = !armoryOpen) {
+  if (!session || session.world.phase !== 'play') open = false;
+  armoryOpen = open;
+  $('armory').classList.toggle('hidden', !open);
+  if (open) {
+    input.unlock();
+    renderArmory();
+  }
 }
 
 const aimV = new THREE.Vector3();
@@ -632,7 +878,7 @@ function isDead() {
 
 function fire() {
   if (fireCooldown > 0 || !session || isDead()) return;
-  fireCooldown = 0.2;
+  fireCooldown = 0.2 * (1 - 0.15 * (me()?.up.rate || 0));
   const world = session.world;
   const target = findTarget(world);
   const from = gunPosition();
@@ -648,8 +894,8 @@ function fire() {
 function tryBuild() {
   const world = session.world;
   const dir = player.buildDir();
-  const def = STRUCTURES[selected];
-  const err = world.placementError(selected, dir) || (world.energy < def.cost ? `Need ⚡${def.cost}. Grab power cells!` : null);
+  const cost = world.costFor(selected, profile.cls);
+  const err = world.placementError(selected, dir) || (world.energy < cost ? `Need ⚡${cost}. Grab power cells!` : null);
   if (err) {
     toast(err, 'bad', 2000);
     sound.play('deny');
@@ -737,13 +983,20 @@ function setupControls() {
       toggleHelp();
       return;
     }
-    if (helpOpen || !session) return;
+    if (code === 'KeyU' || (armoryOpen && code === 'Escape')) {
+      toggleArmory();
+      return;
+    }
+    if (helpOpen || armoryOpen || !session) return;
     if (code.startsWith('Digit')) {
       const i = Number(code.slice(5)) - 1;
       if (STRUCT_TYPES[i]) select(STRUCT_TYPES[i]);
     } else if (code === 'Escape') select(null);
     else if (code === 'KeyE' && selected) tryBuild();
     else if (code === 'KeyQ') ping();
+    else if (code === 'KeyG') throwGrenade();
+    else if (code === 'KeyT') emote('wave');
+    else if (code === 'KeyY') emote('cheer');
     else if (code === 'KeyM') toast(sound.toggleMute() ? '🔇 Sound off' : '🔊 Sound on');
     else if (code === 'KeyX') {
       const st = nearestStructure(session.world);
@@ -751,7 +1004,7 @@ function setupControls() {
     }
   };
   input.onClick = (button) => {
-    if (storyOpen || helpOpen || !session || session.world.phase !== 'play') return;
+    if (storyOpen || helpOpen || armoryOpen || !session || session.world.phase !== 'play') return;
     if (button === 2) {
       selected = null;
       hud.setSelected(null);
@@ -785,6 +1038,9 @@ function setupControls() {
       },
       onHelp: () => toggleHelp(),
       onMute: () => sound.toggleMute(),
+      onGrenade: () => throwGrenade(),
+      onArmory: () => toggleArmory(),
+      onEmote: () => emote(Math.random() < 0.5 ? 'wave' : 'cheer'),
       onAutoFire: (on) => {
         touchPrefs.autoFire = on;
         saveTouchPrefs();
@@ -803,6 +1059,25 @@ function setupControls() {
     });
   }
   $('story-go').addEventListener('click', closeStory);
+  $('grenade-chip').addEventListener('click', throwGrenade);
+  $('armory-chip').addEventListener('click', () => toggleArmory());
+  $('armory-close').addEventListener('click', () => toggleArmory(false));
+  $('armory-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-up]');
+    if (b && session) session.act({ k: 'upgrade', what: b.dataset.up });
+  });
+  $('records-btn').addEventListener('click', () => openRecords());
+  $('records-close').addEventListener('click', () => {
+    recordsOpen = false;
+    $('records').classList.add('hidden');
+  });
+  $('records-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    $('records-tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+    $('records-board').classList.toggle('hidden', b.dataset.tab !== 'board');
+    $('ach-list').classList.toggle('hidden', b.dataset.tab !== 'ach');
+  });
   $('again-btn').addEventListener('click', () => session?.act({ k: 'restart' }));
   $('menu-btn').addEventListener('click', leaveSession);
 }
@@ -837,10 +1112,74 @@ function showVictory(lost = false) {
   ]
     .map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`)
     .join('');
+  finishMission(w, !lost);
   updateVictoryButtons();
   $('victory').classList.remove('hidden');
   $('downed').classList.add('hidden');
   input.unlock();
+}
+
+/** End of a mission: achievements, score, and the leaderboard for this mode. */
+function finishMission(w, won) {
+  const score = scoreFor(w, won);
+  const mode = modeFor(w, dailyKey());
+  $('victory-score').textContent = `Score ${score.toLocaleString()} · ${w.daily ? 'Daily challenge' : DIFFICULTY[w.diff].name}`;
+  if (mission && !mission.scored) {
+    mission.scored = true;
+    if (won) {
+      achieve('first_win');
+      if (w.diff === 'nightmare') achieve('nightmare');
+      if (!mission.turrets && !w.counters.built) achieve('no_turret');
+      if (!mission.downs) achieve('untouched');
+    }
+    if (w.daily) achieve('daily');
+    const entry = { mode, score, name: profile.name, wave: w.wave, won, cls: profile.cls, squad: session.members.length, at: Date.now() };
+    progress.record(mode, entry);
+    submitScore(entry)
+      .then((res) => showBoard($('victory-board'), res.scores, entry))
+      .catch(() => showBoard($('victory-board'), progress.localBoard(mode), entry, true));
+  }
+}
+
+function showBoard(el, list, mine, local = false) {
+  el.innerHTML = list.length
+    ? list
+        .slice(0, 10)
+        .map(
+          (e, i) =>
+            `<li class="${mine && e.at === mine.at && e.score === mine.score ? 'me' : ''}"><b>${i + 1}</b><span>${(e.name || 'Pilot').replace(/[<>]/g, '')} ${CLASSES[e.cls]?.icon || ''}</span><em>W${e.wave}${e.won ? ' ✓' : ''}</em><strong>${Number(e.score).toLocaleString()}</strong></li>`,
+        )
+        .join('')
+    : '<li class="empty">No runs yet. Be the first!</li>';
+  if (local) el.insertAdjacentHTML('beforeend', '<li class="empty">Showing this device’s best runs (online board not configured).</li>');
+}
+
+const BOARD_MODES = [['normal', 'Normal'], ['easy', 'Easy'], ['nightmare', 'Nightmare'], ['daily', 'Today’s daily']];
+function openRecords() {
+  recordsOpen = true;
+  $('records').classList.remove('hidden');
+  sound.play('ui');
+  $('ach-list').innerHTML = ACHIEVEMENTS.map(
+    (a) => `<li class="${progress.has(a.id) ? 'got' : ''}"><i>${a.icon}</i><b>${a.name}</b><span>${a.desc}</span></li>`,
+  ).join('');
+  const load = (m) => {
+    const mode = m === 'daily' ? `daily-${dailyKey()}` : m;
+    $('board-list').innerHTML = '<li class="empty">Loading…</li>';
+    fetchBoard(mode)
+      .then((list) => {
+        showBoard($('board-list'), list);
+        $('board-note').textContent = 'Global leaderboard';
+      })
+      .catch(() => {
+        showBoard($('board-list'), progress.localBoard(mode));
+        $('board-note').textContent = 'Online board unavailable, showing your best runs on this device.';
+      });
+  };
+  if (!openRecords.ready) {
+    openRecords.ready = true;
+    chipRow($('board-modes'), BOARD_MODES, 'normal', load);
+  }
+  load('normal');
 }
 
 function updateVictoryButtons() {
@@ -872,12 +1211,26 @@ function updateVitals(world) {
     $('downed').classList.remove('hidden');
   }
   if (me.dead) {
-    $('downed-timer').textContent = `Respawning at the reactor in ${Math.max(0, Math.ceil(me.respawnAt - world.simTime))}…`;
+    const left = Math.max(0, Math.ceil(me.respawnAt - world.simTime));
+    const squad = world.players.size > 1;
+    $('downed-timer').textContent = me.revive > 0.02
+      ? `Being revived… ${Math.round(me.revive * 100)}%`
+      : squad
+        ? `A teammate can revive you · respawn at the reactor in ${left}s`
+        : `Respawning at the reactor in ${left}…`;
+    $('revive-fill').style.width = `${Math.round(me.revive * 100)}%`;
   } else if (wasDead) {
     wasDead = false;
     $('downed').classList.add('hidden');
-    player.spawn(world);
-    toast('Back in the fight. Protect the reactor!');
+    if (skipSpawn) {
+      // Revived where we fell.
+      skipSpawn = false;
+      player.alt = 0;
+      player.vAlt = 0;
+    } else {
+      player.spawn(world);
+      toast('Back in the fight. Protect the reactor!');
+    }
   }
 }
 
@@ -921,19 +1274,42 @@ function updateGameplay(dt, world) {
     }
   }
 
+  // Walk into an outpost's data terminal to recover its log.
+  for (const [id, at] of pendingLogs) if (now - at > 3000) pendingLogs.delete(id);
+  if (!dead) {
+    world.logSites.forEach((site, id) => {
+      if (world.logs.has(id) || pendingLogs.has(id)) return;
+      if (dist(site, here) * R < 5) {
+        pendingLogs.set(id, now);
+        session.act({ k: 'log', id });
+      }
+    });
+  }
+
   let text = '';
   let salvageLabel = null;
   if (selected && !dead) {
     const dir = player.buildDir();
     const def = STRUCTURES[selected];
-    const err = world.placementError(selected, dir) || (world.energy < def.cost ? `Need ⚡${def.cost}` : null);
+    const cost = world.costFor(selected, profile.cls);
+    const err = world.placementError(selected, dir) || (world.energy < cost ? `Need ⚡${cost}` : null);
     renderer.setGhost(selected, dir, !err, world);
-    text = err ? `✕ ${err}` : isTouch ? `Tap Build for ${def.name} (⚡${def.cost})` : `Click to build ${def.name} (⚡${def.cost}) · Right-click to cancel`;
+    text = err ? `✕ ${err}` : isTouch ? `Tap Build for ${def.name} (⚡${cost})` : `Click to build ${def.name} (⚡${cost}) · Right-click to cancel`;
   } else {
     renderer.setGhost(null);
     const st = dead ? null : nearestStructure(world);
     if (st && !isTouch) text = `[X] Salvage ${STRUCTURES[st.type].name} (+${Math.floor(STRUCTURES[st.type].cost / 2)}⚡)`;
     salvageLabel = st ? `Salvage +${Math.floor(STRUCTURES[st.type].cost / 2)}⚡` : null;
+  }
+  // Standing next to a downed teammate revives them.
+  if (!dead) {
+    for (const [id, p] of world.players) {
+      if (id === meId || !p.dead || !p.downDir) continue;
+      if (dist(p.downDir, here) * R < TUNING.reviveRange + 0.5) {
+        text = `✚ Reviving ${session.memberName(id)}… ${Math.round(p.revive * 100)}%`;
+        break;
+      }
+    }
   }
   if (!dead && !input.active && !helpOpen && !storyOpen) text = 'Click to take control';
   else if (!dead && input.dragMode && !text) text = 'Right-drag to look · Left-click to act';
@@ -947,6 +1323,21 @@ function updateGameplay(dt, world) {
     if (free && (touch.firing || (touch.autoFire && target))) fire();
     // Sticky aim: the view drifts gently onto the locked target so thumbs don't have to be precise.
     if (free && target) stickyAim(target.p, dt);
+  }
+
+  const mine = me();
+  if (mine) {
+    const wait = Math.ceil(mine.grenadeAt - world.simTime);
+    $('grenade-text').textContent = wait > 0 ? `${wait}s` : 'Ready';
+    $('grenade-chip').classList.toggle('ready', wait <= 0);
+    touch?.setGrenade(wait);
+  }
+  if (armoryOpen) {
+    armoryTimer -= dt;
+    if (armoryTimer <= 0) {
+      armoryTimer = 0.5;
+      renderArmory();
+    }
   }
 
   const fuel = $('fuel');
@@ -1026,10 +1417,35 @@ function frame(now) {
     }
     focus = player.dir;
     headlampPos = player.position().addScaledVector(player.dir, 5).addScaledVector(player.fwd, 2);
-    players.push({ id: meId, name: profile.name, color: profile.color, pose: player.pose(), isLocal: true, dead });
+    const mine = world.players.get(meId);
+    players.push({
+      id: meId,
+      name: profile.name,
+      color: profile.color,
+      cls: profile.cls,
+      style: profile.style,
+      pose: player.pose(),
+      isLocal: true,
+      dead,
+      downDir: mine?.downDir,
+      revive: mine?.revive,
+      emote: emotes.get(meId),
+    });
     for (const m of session.members) {
       if (m.id !== meId) {
-        players.push({ id: m.id, name: m.name, color: m.color, pose: session.remotes.get(m.id), dead: !!world.players.get(m.id)?.dead });
+        const p = world.players.get(m.id);
+        players.push({
+          id: m.id,
+          name: m.name,
+          color: m.color,
+          cls: m.cls,
+          style: m.style,
+          pose: session.remotes.get(m.id),
+          dead: !!p?.dead,
+          downDir: p?.downDir,
+          revive: p?.revive,
+          emote: emotes.get(m.id),
+        });
       }
     }
     hudTimer -= dt;
@@ -1046,6 +1462,8 @@ function frame(now) {
     if (moodTimer <= 0) {
       moodTimer = 1;
       sound.setMood(world.waveActive ? 20 : 70);
+      const threat = world.boss ? 1 : world.waveActive ? Math.min(0.8, 0.25 + world.enemies.size / 30) : 0;
+      sound.setIntensity(threat, renderer.stormK);
     }
   } else {
     // Menus: a slow cinematic drone shot circling the colony.
@@ -1075,8 +1493,12 @@ function frame(now) {
     focus = up;
   }
 
-  renderer.update(dt, { world, players, focus, headlampPos });
-  renderer.render(dt);
+  // Slow motion affects only what we see; the shared simulation keeps real time.
+  const slow = performance.now() < slowMoUntil;
+  timeScale += ((slow ? 0.25 : 1) - timeScale) * Math.min(1, dt * (slow ? 12 : 4));
+  const visualDt = dt * timeScale;
+  renderer.update(visualDt, { world, players, focus, headlampPos });
+  renderer.render(visualDt);
   requestAnimationFrame(frame);
 }
 
@@ -1090,6 +1512,11 @@ requestAnimationFrame((t) => {
   $('loading').classList.add('done');
 });
 window.addEventListener('beforeunload', () => session?.leave());
+
+// Installable app with offline Solo play (production builds on a real site only).
+if (import.meta.env.PROD && 'serviceWorker' in navigator && window.top === window.self) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
 
 // Debug handle for local testing only (stripped from production builds).
 if (import.meta.env.DEV) {

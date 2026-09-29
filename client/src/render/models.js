@@ -527,9 +527,9 @@ function segment(parent, mat, radius, length, y) {
  * Options: suit/accent colours, skin/hair indexes, whether they carry a rifle.
  * Returns a group whose userData.rig holds the joints used by animateHuman().
  */
-export function buildHuman({ suit = 0xe6e3dc, accent = 0x7cf7d4, skin = 0, hair = 0, rifle = false, glow = true } = {}) {
+export function buildHuman({ suit = 0xe6e3dc, accent = 0x7cf7d4, skin = 0, hair = 0, rifle = false, glow = true, helmet = 'bubble', pattern = 'plain', badge = null } = {}) {
   const g = new THREE.Group();
-  const suitMat = std(suit, { roughness: 0.65 });
+  const suitMat = std(pattern === 'camo' ? 0x9a9170 : suit, { roughness: 0.65 });
   const accentMat = glow ? std(accent, { emissive: accent, emissiveIntensity: 1.6 }) : std(accent, { roughness: 0.5 });
   const skinMat = std(SKIN[skin % SKIN.length], { roughness: 0.6 });
   const hairMat = std(HAIR[hair % HAIR.length], { roughness: 0.9 });
@@ -566,9 +566,29 @@ export function buildHuman({ suit = 0xe6e3dc, accent = 0x7cf7d4, skin = 0, hair 
   head.add(part(geo.sphere, skinMat, [0.2, 0.24, 0.22], [0, 0.03, 0.01]));
   head.add(part(geo.sphere, hairMat, [0.215, 0.2, 0.23], [0, 0.08, -0.02]));
   for (const x of [-0.045, 0.045]) head.add(part(geo.sphere, eyeMat, [0.03, 0.025, 0.02], [x, 0.05, 0.1], false));
-  const bubble = part(geo.sphere, glassMat, [0.42, 0.42, 0.42], [0, 0.03, 0.01], false);
-  head.add(bubble);
-  head.add(part(geo.box, accentMat, [0.05, 0.03, 0.03], [0.14, 0.17, 0.1], false));
+  if (helmet === 'bubble') {
+    head.add(part(geo.sphere, glassMat, [0.42, 0.42, 0.42], [0, 0.03, 0.01], false));
+    head.add(part(geo.box, accentMat, [0.05, 0.03, 0.03], [0.14, 0.17, 0.1], false));
+  } else {
+    // Hard shell helmet with a mirrored visor (and, for tactical, a rail and antenna).
+    head.add(part(geo.sphere, suitMat, [0.4, 0.4, 0.42], [0, 0.04, 0], true));
+    head.add(part(geo.sphere, mats.visor, [0.3, helmet === 'tactical' ? 0.12 : 0.2, 0.2], [0, helmet === 'tactical' ? 0.06 : 0.03, 0.14], false));
+    head.add(part(geo.box, accentMat, [0.34, 0.03, 0.05], [0, 0.2, 0.12], false));
+    if (helmet === 'tactical') {
+      for (const x of [-0.19, 0.19]) head.add(part(geo.box, mats.darkMetal, [0.05, 0.14, 0.24], [x, 0.04, 0], false));
+      head.add(part(geo.cyl6, mats.darkMetal, [0.015, 0.3, 0.015], [-0.14, 0.34, -0.1], false));
+    }
+  }
+
+  // Suit patterns: racing stripes, or camouflage blotches over a khaki suit.
+  if (pattern === 'stripes') {
+    for (const x of [-0.1, 0.1]) torso.add(part(geo.box, accentMat, [0.04, 0.5, 0.02], [x, 0.3, 0.2], false));
+  } else if (pattern === 'camo') {
+    const blotch = std(0x5a5a3c, { roughness: 0.8 });
+    for (const [x, y] of [[-0.12, 0.2], [0.1, 0.4], [0.05, 0.12]]) torso.add(part(geo.sphere, blotch, [0.16, 0.12, 0.05], [x, y, 0.19], false));
+  }
+  // Class badge: a coloured shoulder plate.
+  if (badge) torso.add(part(geo.box, std(badge, { emissive: badge, emissiveIntensity: 0.8 }), [0.14, 0.05, 0.16], [-0.3, 0.64, 0], false));
 
   const arms = [];
   const elbows = [];
@@ -578,6 +598,7 @@ export function buildHuman({ suit = 0xe6e3dc, accent = 0x7cf7d4, skin = 0, hair 
     torso.add(shoulder);
     const upper = segment(shoulder, suitMat, 0.075, 0.32, 0);
     upper.rotation.z = side * 0.12;
+    if (pattern === 'stripes') upper.add(part(geo.box, accentMat, [0.16, 0.05, 0.16], [0, -0.1, 0], false));
     const fore = segment(upper, suitMat, 0.068, 0.3, -0.32);
     fore.add(part(geo.sphere, gloveMat, [0.1, 0.11, 0.1], [0, -0.33, 0]));
     arms.push(upper);
@@ -639,6 +660,22 @@ export function animateHuman(rig, state, t, aiming = false) {
     elbows[0].rotation.set(-0.7, 0, 0);
   }
   if (state === 'guard') head.rotation.y = Math.sin(t * 0.3) * 0.7;
+  if (state === 'wave') {
+    arms[0].rotation.set(0.1, 0, -2.7 + Math.sin(t * 9) * 0.35);
+    elbows[0].rotation.set(-0.4, 0, 0);
+  }
+  if (state === 'cheer') {
+    const hop = Math.abs(Math.sin(t * 6));
+    arms[0].rotation.set(-0.2, 0, -2.6);
+    arms[1].rotation.set(-0.2, 0, 2.6);
+    elbows[0].rotation.set(-0.3, 0, 0);
+    elbows[1].rotation.set(-0.3, 0, 0);
+    hips.position.y = 0.95 + hop * 0.12;
+    legs[0].rotation.x = -hop * 0.3;
+    legs[1].rotation.x = -hop * 0.3;
+    knees[0].rotation.x = hop * 0.6;
+    knees[1].rotation.x = hop * 0.6;
+  }
   if (state === 'type') {
     arms[0].rotation.set(-0.9, 0, -0.1);
     arms[1].rotation.set(-0.9, 0, 0.1);
@@ -665,10 +702,23 @@ export function animateHuman(rig, state, t, aiming = false) {
 }
 
 /** A player: a human survivor in a suit trimmed with their colour, carrying a rifle. */
-export function buildAvatar(color, name) {
+const CLASS_BADGE = { engineer: 0xffd166, medic: 0xff5a6a, heavy: 0x8ab4ff, scout: 0x7cf7d4 };
+
+export function buildAvatar(color, name, style = {}, cls = 'engineer') {
   const col = new THREE.Color(color);
   const seed = [...name].reduce((a, c) => a + c.charCodeAt(0), 0);
-  const g = buildHuman({ suit: 0xe9e6df, accent: col, skin: seed, hair: seed >> 1, rifle: true });
+  const g = buildHuman({
+    suit: 0xe9e6df,
+    accent: col,
+    skin: seed,
+    hair: seed >> 1,
+    rifle: true,
+    helmet: style.helmet || 'bubble',
+    pattern: style.pattern || 'plain',
+    badge: CLASS_BADGE[cls],
+  });
+  // Heavies carry a bigger, armoured pack.
+  if (cls === 'heavy') g.userData.rig.torso.add(part(geo.box, mats.darkMetal, [0.46, 0.56, 0.26], [0, 0.34, -0.26]));
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(name, color), depthWrite: false, transparent: true }));
   label.scale.set(2.4, 0.6, 1);
   label.position.y = 2.3;
@@ -725,5 +775,65 @@ export function buildShip() {
     if (o.name === 'engine') g.userData.engines.push(o);
   });
   g.userData.engineMat = engineGlow;
+  return g;
+}
+
+/**
+ * The Xal mothership that hangs over the colony on boss waves: a dark armoured wedge with
+ * a spinning ring and a glowing green core underneath (its weak point).
+ */
+export function buildMothership() {
+  const g = new THREE.Group();
+  const hull = std(0x141a18, { metalness: 0.75, roughness: 0.35, emissive: 0x0b2a14, emissiveIntensity: 0.3 });
+  const plate = std(0x0a0e0c, { metalness: 0.85, roughness: 0.3 });
+  const glow = std(0x7dff6a, { emissive: 0x4dff3a, emissiveIntensity: 5 });
+  const body = part(geo.ico1, hull, [26, 5, 34], [0, 0, 0], false);
+  g.add(body);
+  g.add(part(geo.ico1, plate, [14, 4, 22], [0, 2.6, -2], false));
+  for (const side of [-1, 1]) {
+    const fin = part(geo.box, plate, [1.2, 3.5, 16], [side * 9, 2.2, -6], false);
+    fin.rotation.z = side * 0.35;
+    g.add(fin);
+    for (let i = 0; i < 5; i++) g.add(part(geo.box, glow, [0.5, 0.3, 1.4], [side * (5 + i * 1.7), -1.6, 8 - i * 3.2], false));
+  }
+  for (let i = 0; i < 3; i++) g.add(part(geo.cone, plate, [3, 12, 3], [(i - 1) * 7, 0, 16 + (i === 1 ? 3 : 0)], false).rotateX(Math.PI / 2));
+  const ring = new THREE.Mesh(geo.torus, glow);
+  ring.scale.set(9, 9, 18);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = -2.6;
+  ring.name = 'ring';
+  g.add(ring);
+  const core = part(geo.sphere, std(0xb6ff9a, { emissive: 0x7dff4a, emissiveIntensity: 9 }), [5, 5, 5], [0, -3.2, 0], false);
+  core.name = 'core';
+  g.add(core);
+  const halo = new THREE.Mesh(
+    geo.sphere,
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(0x6dff4a).multiplyScalar(1.6), transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  halo.scale.setScalar(11);
+  halo.position.y = -3.2;
+  halo.name = 'halo';
+  g.add(halo);
+  return g;
+}
+
+/** A holographic data terminal marker: a tall gold light pillar and a spinning diamond. */
+export function buildLogBeacon() {
+  const g = new THREE.Group();
+  const beamMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(0xffc24a).multiplyScalar(1.8),
+    transparent: true,
+    opacity: 0.35,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.6, 40, 12, 1, true), beamMat);
+  beam.position.y = 20;
+  g.add(beam);
+  const gem = part(new THREE.OctahedronGeometry(0.6), std(0xffd166, { emissive: 0xffb020, emissiveIntensity: 5 }), [1, 1.4, 1], [0, 3.2, 0], false);
+  gem.name = 'gem';
+  g.add(gem);
   return g;
 }

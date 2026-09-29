@@ -1,4 +1,4 @@
-import { STRUCTURES, STRUCT_TYPES, TUNING } from '../sim/defs.js';
+import { STRUCTURES, STRUCT_TYPES, TUNING, CLASSES } from '../sim/defs.js';
 import { PLANET_RADIUS as R } from '../sim/terrain.js';
 
 const $ = (id) => document.getElementById(id);
@@ -34,8 +34,9 @@ export function renderPlayerList(el, members, hostId, meId, world) {
   el.innerHTML = members
     .map((m) => {
       const p = world?.players.get(m.id);
-      const hp = p ? Math.max(0, p.hp) : TUNING.playerHp;
-      return `<li class="${p?.dead ? 'down' : ''}"><span class="dot" style="color:${esc(m.color)}"></span>${esc(m.name)}${
+      const hp = p ? Math.max(0, (p.hp / (p.maxHp || 100)) * 100) : 100;
+      const icon = CLASSES[m.cls]?.icon || '';
+      return `<li class="${p?.dead ? 'down' : ''}"><span class="dot" style="color:${esc(m.color)}"></span><span class="cls" title="${esc(CLASSES[m.cls]?.name || '')}">${icon}</span>${esc(m.name)}${
         m.id === meId ? ' <small>(you)</small>' : ''
       }${m.id === hostId ? '<span class="tag">host</span>' : ''}${
         world ? `<span class="mini"><i style="width:${hp}%"></i></span>` : ''
@@ -49,7 +50,9 @@ function alert(world, me) {
   if (me?.dead) return '';
   const r = world.reactor.hp / world.reactor.max;
   if (world.simTime - world.reactorHitAt < 1.5) return r < 0.35 ? '⚠ REACTOR CRITICAL! Get back to the base!' : '⚠ The reactor is under attack!';
-  if (me && me.hp < 35) return '❤ Low health! Stand near a Med Station or back off to recover.';
+  if (me && me.hp < me.maxHp * 0.35) return '❤ Low health! Stand near a Med Station or a Medic, or back off to recover.';
+  if (world.boss?.strikes.length) return '⚠ Orbital strike! Get out of the green rings!';
+  if ([...world.players.values()].some((p) => p.dead && p !== me)) return '✚ A pilot is down! Stand next to them to revive.';
   if (world.pods.size) return '☄ Drop pods incoming. Shoot them before they land in the red rings!';
   if (!world.waveActive && world.wave === 0) {
     if (!world.structures.size) return `Grab the glowing power cells, then ${document.body.classList.contains('touch') ? 'tap the turret slot' : 'press 1'} to build an Auto Turret near the reactor.`;
@@ -61,7 +64,15 @@ function alert(world, me) {
 
 export class Hud {
   constructor() {
+    this.cls = 'engineer';
     this.buildHotbar();
+  }
+
+  /** Engineers see (and pay) the discounted turret price. */
+  setClass(cls) {
+    this.cls = cls;
+    const turret = this.slots.find((s) => s.dataset.type === 'turret');
+    if (turret) turret.querySelector('.cost').textContent = `⚡${cls === 'engineer' ? Math.round(STRUCTURES.turret.cost * 0.7) : STRUCTURES.turret.cost}`;
   }
 
   buildHotbar() {
@@ -87,10 +98,15 @@ export class Hud {
   update(world, meId) {
     const me = world.players.get(meId);
     const hp = me ? Math.max(0, Math.round(me.hp)) : TUNING.playerHp;
+    const pct = me ? (hp / (me.maxHp || 100)) * 100 : 100;
     $('hp-value').textContent = me?.dead ? 'DOWN' : String(hp);
-    $('hp-bar').style.width = `${hp}%`;
-    $('hp-bar').style.backgroundPosition = `${-(1 - hp / 100) * 160}px 0`;
-    $('hp-bar').classList.toggle('low', hp < 30);
+    $('hp-bar').style.width = `${pct}%`;
+    $('hp-bar').style.backgroundPosition = `${-(1 - pct / 100) * 160}px 0`;
+    $('hp-bar').classList.toggle('low', pct < 30);
+
+    const boss = world.boss;
+    $('boss-bar').classList.toggle('hidden', !boss);
+    if (boss) $('boss-fill').style.width = `${Math.max(0, (boss.hp / boss.maxHp) * 100)}%`;
 
     const r = Math.max(0, world.reactor.hp / world.reactor.max);
     $('reactor-value').textContent = `${Math.round(r * 100)}%`;
@@ -110,7 +126,7 @@ export class Hud {
       $('wave-status').style.color = '';
     }
 
-    for (const slot of this.slots) slot.classList.toggle('poor', world.energy < STRUCTURES[slot.dataset.type].cost);
+    for (const slot of this.slots) slot.classList.toggle('poor', world.energy < world.costFor(slot.dataset.type, this.cls));
     $('objective').textContent = world.phase === 'play' ? alert(world, me) : '';
   }
 
@@ -217,6 +233,9 @@ export class Hud {
     for (const { c, m } of cells) marker(c.dir, '#5fc8ff', 'diamond', `${m}m`);
     for (const e of world.enemies.values()) marker(e.dir, e.kind === 1 ? '#ff9a3a' : '#7dff5a', 'dot', `${meters(e.dir)}m`);
     for (const p of world.pods.values()) if (world.simTime > p.t0 - 2) marker(p.dir, '#ff4a5a', 'down', `${meters(p.dir)}m`);
+    // Data logs: all marked, only the nearest labelled so the strip stays readable.
+    const logs = world.logSites.map((dir, i) => ({ dir, i, m: meters(dir) })).filter((l) => !world.logs.has(l.i)).sort((a, b) => a.m - b.m);
+    logs.forEach((l, k) => marker(l.dir, '#ffc24a', 'diamond', k === 0 ? `LOG ${l.m}m` : null));
     const baseM = meters(world.baseDir);
     if (baseM > 6) marker(world.baseDir, '#ffd166', 'home', `${baseM}m`);
 
@@ -276,6 +295,11 @@ export class Hud {
     const t = world.simTime;
     for (const p of world.pods.values()) if (t > p.t0 - 2) plot(p.dir, Math.sin(t * 12) > 0 ? '#ff4a5a' : '#ffb14a', 9, true);
     for (const e of world.enemies.values()) plot(e.dir, e.kind === 1 ? '#ff9a3a' : '#7dff5a', e.kind === 1 ? 8 : 5, true);
+    world.logSites.forEach((dir, i) => {
+      if (!world.logs.has(i)) plot(dir, '#ffc24a', 6, true);
+    });
+    for (const [, p] of world.players) if (p.dead && p.downDir) plot(p.downDir, Math.sin(t * 8) > 0 ? '#ff5a6a' : '#ffffff', 7, true);
+    if (world.boss) for (const s of world.boss.strikes) plot(s.dir, '#7dff4a', 10, true);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.moveTo(c, c - 12);

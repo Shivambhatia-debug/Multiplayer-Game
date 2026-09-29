@@ -3,6 +3,7 @@
 // It exposes the same /api/* routes as the Vercel functions.
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
+import { MemoryBoards, cleanEntry, cleanMode } from './lib/scores.js';
 
 const PORT = Number(process.env.PORT) || 8787;
 const MAX_PLAYERS = 6;
@@ -13,6 +14,7 @@ const ALLOWED = (process.env.ALLOWED_ORIGINS || '*').split(',').map((o) => o.tri
 /** @type {Map<string, Map<string, {ws: import('ws').WebSocket, meta: object}>>} */
 const rooms = new Map();
 let joinCounter = 0;
+const boards = new MemoryBoards();
 
 function cors(req, res) {
   const origin = req.headers.origin;
@@ -21,7 +23,7 @@ function cors(req, res) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
@@ -46,6 +48,31 @@ const server = http.createServer((req, res) => {
     const secure = req.headers['x-forwarded-proto'] === 'https';
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     json(res, 200, { realtime: 'ws', wsUrl: `${secure ? 'wss' : 'ws'}://${host}/ws`, maxPlayers: MAX_PLAYERS });
+    return;
+  }
+  if (url.pathname === '/api/scores') {
+    if (req.method === 'POST') {
+      let raw = '';
+      req.on('data', (chunk) => {
+        raw += chunk;
+        if (raw.length > 4096) req.destroy();
+      });
+      req.on('end', () => {
+        let entry = null;
+        try {
+          entry = cleanEntry(JSON.parse(raw || '{}'));
+        } catch {
+          entry = null;
+        }
+        if (!entry) return json(res, 400, { error: 'Invalid score.' });
+        boards.add(entry);
+        json(res, 200, { ok: true, scores: boards.top(entry.mode) });
+      });
+      return;
+    }
+    const mode = cleanMode(url.searchParams.get('mode'));
+    if (!mode) return json(res, 400, { error: 'Unknown mode.' });
+    json(res, 200, { mode, scores: boards.top(mode) });
     return;
   }
   const roomMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
@@ -74,6 +101,21 @@ function presence(code) {
 
 function clean(text, max) {
   return String(text || '').replace(/[<>]/g, '').slice(0, max);
+}
+
+/** Whitelists what a player may publish about themselves. */
+function cleanMeta(meta, joinedAt) {
+  const pick = (value, allowed) => (allowed.includes(value) ? value : allowed[0]);
+  return {
+    name: clean(meta?.name, 16) || 'Pilot',
+    color: /^#[0-9a-f]{6}$/i.test(meta?.color) ? meta.color : '#7cf7d4',
+    cls: pick(meta?.cls, ['engineer', 'medic', 'heavy', 'scout']),
+    style: {
+      helmet: pick(meta?.style?.helmet, ['bubble', 'visor', 'tactical']),
+      pattern: pick(meta?.style?.pattern, ['plain', 'stripes', 'camo']),
+    },
+    joinedAt,
+  };
 }
 
 wss.on('connection', (ws) => {
@@ -105,15 +147,19 @@ wss.on('connection', (ws) => {
       id = wantedId;
       room.set(id, {
         ws,
-        meta: {
-          name: clean(msg.meta?.name, 16) || 'Pilot',
-          color: /^#[0-9a-f]{6}$/i.test(msg.meta?.color) ? msg.meta.color : '#7cf7d4',
-          joinedAt: ++joinCounter,
-        },
+        meta: cleanMeta(msg.meta, ++joinCounter),
       });
       rooms.set(code, room);
       ws.send(JSON.stringify({ type: 'joined', room: code }));
       presence(code);
+      return;
+    }
+    if (msg.type === 'meta' && code) {
+      const entry = rooms.get(code)?.get(id);
+      if (entry) {
+        entry.meta = cleanMeta(msg.meta, entry.meta.joinedAt);
+        presence(code);
+      }
       return;
     }
     if (msg.type === 'msg' && code) {

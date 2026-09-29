@@ -8,7 +8,7 @@ const HP_SYNC_INTERVAL = 1;
  * Glue between a transport and the simulation. The earliest player in the room is
  * the host: it steps the world and broadcasts snapshots. Everyone else mirrors it.
  *
- * Message types: w=world, k=tick, e=events, p=pose, a=action, s=shot fx, g=ping, r=request state.
+ * Message types: w=world, k=tick, e=events, p=pose, a=action, s=shot fx, g=ping, x=emote, r=request state.
  */
 export class Session {
   constructor({ transport, room, me, solo = false }) {
@@ -32,6 +32,7 @@ export class Session {
     this.onEvents = () => {};
     this.onShot = () => {};
     this.onPing = () => {};
+    this.onEmote = () => {};
     this.onError = () => {};
     this.onHostChange = () => {};
   }
@@ -48,7 +49,8 @@ export class Session {
     this.transport.onMessage = (data, from) => this.handleMessage(data, from);
     this.transport.onPresence = (list) => this.handlePresence(list);
     this.transport.onError = (msg) => this.onError(msg);
-    await this.transport.connect({ room: this.room, id: this.me.id, meta: { name: this.me.name, color: this.me.color } });
+    const { name, color, cls, style } = this.me;
+    await this.transport.connect({ room: this.room, id: this.me.id, meta: { name, color, cls, style } });
     // Ask the host for state in case its presence-triggered broadcast raced our subscription.
     setTimeout(() => {
       if (!this.isHost && !this.gotWorld) this.transport.send({ t: 'r' });
@@ -104,6 +106,9 @@ export class Session {
       case 'g':
         this.onPing({ ...data, from });
         break;
+      case 'x':
+        this.onEmote({ ...data, from });
+        break;
       case 'r':
         if (this.isHost) this.broadcastState();
         break;
@@ -151,6 +156,22 @@ export class Session {
     this.transport.send({ t: 'g', ...ping });
   }
 
+  sendEmote(emote) {
+    this.transport.send({ t: 'x', ...emote });
+  }
+
+  /** Changes what others see about us (class, style) without rejoining. */
+  updateMe(fields) {
+    this.me = { ...this.me, ...fields };
+    const { name, color, cls, style } = this.me;
+    this.transport.updateMeta?.({ name, color, cls, style });
+  }
+
+  /** The member record (name, colour, class, style) for a player id. */
+  member(id) {
+    return this.members.find((m) => m.id === id);
+  }
+
   update(dt) {
     const world = this.world;
     if (!this.isHost) {
@@ -159,9 +180,9 @@ export class Session {
     }
     // Every connected pilot, with their latest position (null while downed or not yet posed).
     const players = this.members.map((m) => {
-      if (m.id === this.me.id) return { id: m.id, dir: this.localDir };
+      if (m.id === this.me.id) return { id: m.id, dir: this.localDir, cls: this.me.cls };
       const pose = this.remotes.get(m.id);
-      return { id: m.id, dir: Array.isArray(pose?.d) ? pose.d : null };
+      return { id: m.id, dir: Array.isArray(pose?.d) ? pose.d : null, cls: m.cls };
     });
     this.emitEvents(world.step(dt, players));
     if (this.solo) return;

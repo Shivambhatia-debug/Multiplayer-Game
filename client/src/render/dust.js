@@ -74,11 +74,13 @@ export class Dust {
     if (!this.visible || !focus) return;
     const cam = camera.position;
     const half = BOX / 2;
+    // Storms blow the dust sideways, hard.
+    const gust = 1 + (this.storm || 0) * 9;
     for (let i = 0; i < MOTES; i++) {
       const j = i * 3;
-      this.offsets[j] += this.wind.x * dt + Math.sin(t * 0.7 + i) * 0.01;
+      this.offsets[j] += this.wind.x * gust * dt + Math.sin(t * 0.7 + i) * 0.01;
       this.offsets[j + 1] += this.wind.y * dt + Math.cos(t * 0.5 + i * 1.3) * 0.01;
-      this.offsets[j + 2] += this.wind.z * dt;
+      this.offsets[j + 2] += this.wind.z * gust * dt;
       for (let k = 0; k < 3; k++) {
         if (this.offsets[j + k] > half) this.offsets[j + k] -= BOX;
         else if (this.offsets[j + k] < -half) this.offsets[j + k] += BOX;
@@ -88,6 +90,8 @@ export class Dust {
       this.motePos[j + 2] = cam.z + this.offsets[j + 2];
     }
     this.motes.geometry.attributes.position.needsUpdate = true;
+    this.motes.material.size = 0.09 + (this.storm || 0) * 0.08;
+    this.motes.material.opacity = 0.55 + (this.storm || 0) * 0.35;
 
     // Each devil circles the player at a distance, drifting slowly.
     const up = focus;

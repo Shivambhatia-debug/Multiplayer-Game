@@ -6,7 +6,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { PLANET_RADIUS as R } from '../sim/terrain.js';
 import { sunDir, TUNING } from '../sim/defs.js';
-import { podPos } from '../sim/world.js';
+import { podPos, bossPos } from '../sim/world.js';
 import {
   buildStructure,
   buildGhost,
@@ -18,6 +18,8 @@ import {
   buildAlien,
   animateXal,
   XAL_CHEST,
+  buildMothership,
+  buildLogBeacon,
   buildReactor,
   hash01,
 } from './models.js';
@@ -29,6 +31,7 @@ import { Dust } from './dust.js';
 import { Survivors } from './survivors.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
+const STORM_COLOR = new THREE.Color(0x6a3418);
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const tmpV3 = new THREE.Vector3();
@@ -133,6 +136,10 @@ export class GameRenderer {
     this.pods = new Map();
     this.enemies = new Map();
     this.avatars = new Map();
+    this.strikes = new Map();
+    this.logBeacons = [];
+    this.boss = null;
+    this.stormK = 0;
     this.reactor = null;
     this.ghost = null;
     this.ghostType = null;
@@ -331,6 +338,13 @@ export class GameRenderer {
       }
       map.clear();
     }
+    for (const b of this.logBeacons) this.entities.remove(b);
+    this.logBeacons = world.logSites.map((dir) => {
+      const b = buildLogBeacon();
+      orient(b, dir, world.terrain.surfaceRadius(dir));
+      this.entities.add(b);
+      return b;
+    });
     this.terrainView.build(world);
     this.terrainView.paint(world);
     for (const r of this.terrainView.rocks) r.castShadow = this.rockShadows !== false;
@@ -539,23 +553,25 @@ export class GameRenderer {
   syncAvatars(players, world, dt) {
     const seen = new Set();
     for (const p of players) {
-      if (!p.pose || p.dead) continue;
+      const downed = p.dead && p.downDir;
+      if ((!p.pose && !downed) || (p.dead && !downed)) continue;
       seen.add(p.id);
       let a = this.avatars.get(p.id);
-      if (!a || a.color !== p.color || a.name !== p.name) {
+      const look = `${p.color}|${p.name}|${p.cls}|${p.style?.helmet}|${p.style?.pattern}`;
+      if (!a || a.look !== look) {
         if (a) this.entities.remove(a.obj);
-        const obj = buildAvatar(p.color, p.name);
+        const obj = buildAvatar(p.color, p.name, p.style, p.cls);
         obj.traverse((o) => {
           if (o.isMesh) o.castShadow = true;
         });
         this.entities.add(obj);
+        const start = p.pose ? p.pose.d : p.downDir;
         a = {
           obj,
-          color: p.color,
-          name: p.name,
-          dir: new THREE.Vector3(...p.pose.d),
-          fwd: new THREE.Vector3(...p.pose.f),
-          alt: p.pose.h,
+          look,
+          dir: new THREE.Vector3(...start),
+          fwd: new THREE.Vector3(...(p.pose ? p.pose.f : [1, 0, 0])),
+          alt: p.pose ? p.pose.h : 0,
           rig: obj.userData.rig,
           label: obj.getObjectByName('label'),
           walk: 0,
@@ -565,6 +581,27 @@ export class GameRenderer {
       }
       a.label.visible = !p.isLocal && !a.board;
       if (a.board) continue;
+      if (downed) {
+        // Lying on the ground where they fell, with a pulsing red ring for teammates to find.
+        a.dir.set(...p.downDir);
+        a.fwd.addScaledVector(a.dir, -a.fwd.dot(a.dir)).normalize();
+        a.obj.position.copy(a.dir).multiplyScalar(world.terrain.surfaceRadius(p.downDir) + 0.25);
+        face(a.obj, a.dir, a.fwd);
+        a.obj.rotateX(-Math.PI / 2);
+        animateHuman(a.rig, 'idle', 0);
+        if (!a.ring) {
+          a.ring = buildWarning();
+          a.ring.scale.setScalar(0.55);
+          this.entities.add(a.ring);
+        }
+        a.ring.visible = true;
+        orient(a.ring, p.downDir, world.terrain.surfaceRadius(p.downDir));
+        a.ring.userData.mats[0].opacity = 0.4 + 0.5 * Math.abs(Math.sin(this.clock * 4));
+        a.ring.userData.mats[1].opacity = 0.1 + (p.revive || 0) * 0.5;
+        a.prev = null;
+        continue;
+      }
+      if (a.ring) a.ring.visible = false;
       const k = p.isLocal ? 1 : 1 - Math.exp(-14 * dt);
       const teleport = a.dir.distanceTo(tmpV.set(...p.pose.d)) * R > 12;
       a.dir.lerp(tmpV.set(...p.pose.d), teleport ? 1 : k).normalize();
@@ -594,14 +631,88 @@ export class GameRenderer {
       else if (a.speed > 0.35) state = 'walk';
       const perRadian = state === 'run' ? 0.45 : 0.32;
       a.walk += state === 'walk' || state === 'run' ? (dt * a.speed) / perRadian : dt * 1.5;
+      // Emotes play for two seconds when standing still.
+      if (p.emote && this.clock - p.emote.at < 2.2 && state === 'idle') {
+        animateHuman(a.rig, p.emote.kind, this.clock * 1.5, false);
+        continue;
+      }
       if (!a.board) animateHuman(a.rig, state, a.walk, true);
     }
     for (const [id, a] of this.avatars) {
       if (!seen.has(id)) {
         this.entities.remove(a.obj);
+        if (a.ring) this.entities.remove(a.ring);
         this.avatars.delete(id);
       }
     }
+  }
+
+  /** The mothership, its orbital-strike warnings, and the data-log beacons. */
+  syncBoss(world) {
+    const b = world.boss;
+    if (!b) {
+      if (this.boss) this.boss.obj.visible = false;
+      for (const [id, w] of this.strikes) {
+        this.entities.remove(w);
+        this.strikes.delete(id);
+      }
+    } else {
+      if (!this.boss) {
+        const obj = buildMothership();
+        this.entities.add(obj);
+        this.boss = { obj, ring: obj.getObjectByName('ring'), core: obj.getObjectByName('core'), halo: obj.getObjectByName('halo') };
+      }
+      const t = world.simTime;
+      const { obj, ring, core, halo } = this.boss;
+      obj.visible = true;
+      const pos = bossPos(b, t);
+      const ahead = bossPos(b, t + 0.5);
+      obj.position.set(...pos);
+      const up = tmpV.set(...pos).normalize();
+      const fwd = tmpV3.set(ahead[0] - pos[0], ahead[1] - pos[1], ahead[2] - pos[2]);
+      fwd.addScaledVector(up, -fwd.dot(up));
+      if (fwd.lengthSq() > 1e-8) face(obj, up.clone(), fwd.normalize());
+      ring.rotation.z += 0.02;
+      const pulse = 1 + Math.sin(this.clock * 4) * 0.08;
+      core.scale.setScalar(5 * pulse);
+      halo.scale.setScalar(11 * pulse * (1 - b.hp / b.maxHp * 0.3));
+      const live = new Set();
+      for (const s of b.strikes) {
+        live.add(s.id);
+        let w = this.strikes.get(s.id);
+        if (!w) {
+          w = buildWarning();
+          w.scale.setScalar(1.12);
+          orient(w, s.dir, world.terrain.surfaceRadius(s.dir));
+          this.entities.add(w);
+          this.strikes.set(s.id, w);
+        }
+        const k = 1 - Math.max(0, (s.at - t) / 1.6);
+        w.userData.mats[0].opacity = 0.3 + k * 0.7;
+        w.userData.mats[1].opacity = 0.05 + k * 0.35;
+      }
+      for (const [id, w] of this.strikes) {
+        if (!live.has(id)) {
+          this.entities.remove(w);
+          this.strikes.delete(id);
+        }
+      }
+    }
+    world.logSites.forEach((dir, i) => {
+      const beacon = this.logBeacons[i];
+      if (!beacon) return;
+      beacon.visible = !world.logs.has(i);
+      const gem = beacon.getObjectByName('gem');
+      gem.rotation.y += 0.03;
+      gem.position.y = 3.2 + Math.sin(this.clock * 2 + i) * 0.25;
+    });
+  }
+
+  /** World position of the mothership's glowing core (its weak point), or null. */
+  bossCore(world) {
+    if (!world.boss) return null;
+    const p = bossPos(world.boss, world.simTime);
+    return tmpV2.set(...p).addScaledVector(tmpV.set(...p).normalize(), -3.2).clone();
   }
 
   setGhost(type, dir, valid, world) {
@@ -646,6 +757,15 @@ export class GameRenderer {
       this.night = 1 - day;
       this.fog.color.copy(this.sky.horizon).lerp(this.sky.zenith, 0.12);
       this.fog.density = 0.013 + (1 - day) * 0.004;
+      // Dust storm: the air thickens to a dark red-brown haze.
+      const s = world.storm;
+      const target = s ? Math.min(1, Math.max(0, (world.simTime - s.start) / 4), Math.max(0, (s.end - world.simTime) / 4)) : 0;
+      this.stormK += (target - this.stormK) * Math.min(1, dt * 2);
+      if (this.stormK > 0.001) {
+        this.fog.density += this.stormK * 0.045;
+        this.fog.color.lerp(STORM_COLOR, this.stormK * 0.8);
+      }
+      this.dust.storm = this.stormK;
       this.hemi.position.copy(focus);
       this.hemi.color.copy(this.sky.zenith).lerp(this.sky.horizon, 0.5);
       this.hemi.groundColor.setRGB(0.25, 0.12, 0.08);
@@ -746,6 +866,33 @@ export class GameRenderer {
     this.fx.burst(b, 0x9dff3a, 24, 4, 0.7);
   }
 
+  /** Orbital strike from the mothership: a beam from its core to the ground. */
+  strike(dir, world) {
+    const ground = new THREE.Vector3(...dir).multiplyScalar(this.surfaceAt(dir) + 0.5);
+    const core = this.bossCore(world);
+    if (core) this.fx.beam(core, ground, 0x7dff4a);
+    this.fx.burst(ground, 0x9dff6a, 160, 16, 1.2);
+    this.fx.burst(ground, 0xffffff, 60, 9, 0.6);
+    this.fx.shockwave(ground, 0x7dff4a, 9, 0.8);
+    this.shakeFrom(ground, 1.4);
+  }
+
+  grenade(dir) {
+    const p = new THREE.Vector3(...dir).multiplyScalar(this.surfaceAt(dir) + 0.6);
+    this.fx.burst(p, 0xffb14a, 120, 12, 0.9);
+    this.fx.burst(p, 0xffffff, 40, 7, 0.4);
+    this.fx.shockwave(p, 0xff8a3a, 9, 0.6);
+    this.shakeFrom(p, 0.8);
+  }
+
+  bossDown(pos) {
+    const p = new THREE.Vector3(...pos);
+    for (let i = 0; i < 4; i++) this.fx.burst(p, i % 2 ? 0x7dff4a : 0xffd08a, 260, 26, 2.2);
+    this.fx.shockwave(p, 0x9dff6a, 40, 2);
+    this.shake = 2.2;
+    if (this.boss) this.boss.obj.visible = false;
+  }
+
   sparkle(dir, color, lift = 1) {
     const p = new THREE.Vector3(...dir);
     p.multiplyScalar(this.surfaceAt(dir) + lift + 1.5);
@@ -766,6 +913,7 @@ export class GameRenderer {
     this.syncCells(world, this.clock);
     this.syncPods(world);
     this.syncAvatars(players, world, dt);
+    this.syncBoss(world);
     this.survivors.update(dt, this.clock, world, [...this.avatars.values()]);
     this.updateEnvironment(world, dt, focus);
     this.dust.update(dt, this.clock, this.camera, world, focus);
