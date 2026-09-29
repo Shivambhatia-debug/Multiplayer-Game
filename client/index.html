@@ -13,6 +13,8 @@
     <meta property="og:title" content="ARES: Last Colony" />
     <meta property="og:description" content="Earth is gone. Hold the last colony on Mars against the Xal." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -71,14 +73,36 @@
           <span>Suit colour</span>
           <div id="swatches" class="swatches"></div>
         </div>
+        <div class="field">
+          <span>Class · <em id="class-desc" class="field-note"></em></span>
+          <div id="class-pick" class="class-pick"></div>
+        </div>
+        <div class="field row2">
+          <div>
+            <span>Helmet</span>
+            <div id="helmet-pick" class="chip-pick"></div>
+          </div>
+          <div>
+            <span>Suit</span>
+            <div id="pattern-pick" class="chip-pick"></div>
+          </div>
+        </div>
+        <div class="field">
+          <span>Difficulty</span>
+          <div id="diff-pick" class="chip-pick"></div>
+        </div>
         <button id="create-btn" class="btn primary">Create room</button>
         <div class="divider"><span>or join a crew</span></div>
         <div class="join-row">
           <input id="code-input" maxlength="5" autocomplete="off" placeholder="CODE" spellcheck="false" />
           <button id="join-btn" class="btn">Join</button>
         </div>
-        <button id="solo-btn" class="btn ghost">Play solo</button>
         <div class="join-row">
+          <button id="solo-btn" class="btn ghost">Play solo</button>
+          <button id="daily-btn" class="btn ghost" title="Same planet and waves for everyone today">📅 Daily</button>
+        </div>
+        <div class="join-row">
+          <button id="records-btn" class="btn ghost small">🏆 Records</button>
           <button id="intro-btn" class="btn ghost small">▶ Watch intro</button>
           <button id="quality-btn" class="btn ghost small">Graphics: High</button>
         </div>
@@ -97,6 +121,11 @@
         <button id="room-code" class="room-code" title="Copy invite link">—</button>
         <p class="hint" id="copy-hint"><span class="kb-only">Click</span><span class="touch-only">Tap</span> the code to copy an invite link</p>
         <ul id="lobby-players" class="player-list"></ul>
+        <div class="field">
+          <span>Your class</span>
+          <div id="lobby-class-pick" class="class-pick"></div>
+        </div>
+        <p id="lobby-diff" class="hint"></p>
         <div class="lobby-brief">
           <h3>Your mission</h3>
           <ol>
@@ -147,11 +176,17 @@
       <div id="floaters"></div>
       <div id="banner"></div>
       <div id="combo"></div>
-      <div id="downed" class="hidden"><b>You are down</b><span id="downed-timer">Respawning at the reactor…</span></div>
+      <div id="downed" class="hidden"><b>You are down</b><span id="downed-timer">Respawning at the reactor…</span><div class="bar"><i id="revive-fill"></i></div></div>
       <div id="crosshair"><i></i><i></i><i></i><i></i></div>
       <div id="prompt"></div>
       <div id="build-info" class="panel hidden"></div>
       <div id="hotbar"></div>
+      <div id="boss-bar" class="hidden"><b>Xal Mothership</b><div class="bar"><i id="boss-fill"></i></div><small>Shoot the glowing core underneath!</small></div>
+      <div id="abilities">
+        <button id="grenade-chip" class="ability" title="Plasma grenade"><kbd class="kb-only">G</kbd> 💣 <span id="grenade-text">Ready</span></button>
+        <button id="armory-chip" class="ability" title="Upgrades"><kbd class="kb-only">U</kbd> ⬆ <span>Armory</span></button>
+      </div>
+      <div id="log-card" class="panel hidden"><p class="eyebrow">📡 Data log recovered</p><b id="log-title"></b><p id="log-text"></p></div>
     </section>
 
     <div id="toasts" aria-live="polite"></div>
@@ -173,6 +208,35 @@
       </div>
     </section>
 
+    <!-- Armory: rifle upgrades bought with colony energy -->
+    <section id="armory" class="overlay hidden">
+      <div class="card wide">
+        <h2>Armory</h2>
+        <p class="hint">Upgrades cost shared colony energy and last until the mission ends.</p>
+        <div id="armory-list" class="armory-list"></div>
+        <div id="armory-class" class="armory-class"></div>
+        <button id="armory-close" class="btn primary">Back to the fight</button>
+      </div>
+    </section>
+
+    <!-- Records: achievements and leaderboards -->
+    <section id="records" class="overlay hidden">
+      <div class="card wide">
+        <h2>Records</h2>
+        <div class="tabs" id="records-tabs">
+          <button data-tab="board" class="active">🏆 Leaderboard</button>
+          <button data-tab="ach">🎖 Achievements</button>
+        </div>
+        <div id="records-board">
+          <div id="board-modes" class="chip-pick"></div>
+          <ol id="board-list" class="board-list"></ol>
+          <p id="board-note" class="hint"></p>
+        </div>
+        <ul id="ach-list" class="ach-list hidden"></ul>
+        <button id="records-close" class="btn primary">Close</button>
+      </div>
+    </section>
+
     <!-- Help -->
     <section id="help" class="overlay hidden">
       <div class="card wide">
@@ -188,6 +252,8 @@
               <li><kbd>Run</kbd> Toggle sprint</li>
               <li>Tap a slot at the bottom, then <kbd>Build</kbd> to place it · <kbd>✕</kbd> cancels</li>
               <li><kbd>📍</kbd> Ping a spot for your team · <kbd>🎯</kbd> Auto-fire on/off</li>
+              <li><kbd>💣</kbd> Plasma grenade · <kbd>⬆</kbd> Armory upgrades · <kbd>👋</kbd> Emote</li>
+              <li>Stand next to a downed teammate to revive them</li>
             </ul>
             <label class="look-speed">
               <span>Look speed</span>
@@ -206,6 +272,9 @@
               <li><kbd>Right click</kbd> Cancel build</li>
               <li><kbd>X</kbd> Salvage nearby structure</li>
               <li><kbd>Q</kbd> Ping a spot for your team</li>
+              <li><kbd>G</kbd> Plasma grenade · <kbd>U</kbd> Armory upgrades</li>
+              <li><kbd>T</kbd> Wave · <kbd>Y</kbd> Cheer (emotes)</li>
+              <li>Stand next to a downed teammate to revive them</li>
               <li><kbd>M</kbd> Mute · <kbd>H</kbd> Help</li>
             </ul>
           </div>
@@ -215,8 +284,12 @@
               <li><b>The reactor</b> is the heart of the colony. If it hits 0%, the game is over. It repairs slowly between waves.</li>
               <li><b>Energy</b> is shared. Walk into glowing blue <b>power cells</b>, kill aliens and clear waves to earn it.</li>
               <li><b>Auto Turrets</b> shoot on their own. <b>Generators</b> make energy. <b>Med Stations</b> heal you. <b>Barricades</b> hold aliens back.</li>
-              <li><b>The Xal:</b> Drones are fast, Brutes are tanks, Spitters shoot acid from range. Shoot <b>drop pods</b> before they land or they release more drones.</li>
-              <li>The <b>compass</b> and <b>radar</b> show aliens (green), pods (red), power cells (blue) and the reactor (gold).</li>
+              <li><b>The Xal:</b> Stalkers are fast blade fighters, Juggernauts are armoured tanks with double blades, Casters throw acid from range. Shoot <b>drop pods</b> before they land or they release more Stalkers.</li>
+              <li><b>Classes:</b> Engineers build cheap turrets and repair, Medics heal and revive fast, Heavies hit hard, Scouts run and fly further.</li>
+              <li><b>Mothership</b> (waves 5 and 10): dodge the green strike rings and shoot the glowing core underneath.</li>
+              <li><b>Data logs:</b> gold light pillars mark abandoned outposts. Walk in to recover the story and bonus energy.</li>
+              <li><b>Dust storms</b> hide Xal ambushes. Watch the radar.</li>
+              <li>The <b>compass</b> and <b>radar</b> show aliens (green), pods (red), power cells (blue), data logs (gold diamonds) and the reactor.</li>
             </ul>
           </div>
         </div>
@@ -234,6 +307,8 @@
         <h2 id="victory-title">It breathes.</h2>
         <div id="medal" class="medal"></div>
         <div id="victory-stats" class="victory-stats"></div>
+        <p id="victory-score" class="victory-score"></p>
+        <ol id="victory-board" class="board-list compact"></ol>
         <div class="row">
           <button id="again-btn" class="btn primary">Terraform a new planet</button>
           <button id="menu-btn" class="btn ghost">Main menu</button>

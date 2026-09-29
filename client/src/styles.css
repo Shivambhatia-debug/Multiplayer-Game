@@ -2659,3 +2659,496 @@ body.touch .hud-right {
     white-space: nowrap;
   }
 }
+
+/* ---------- Classes, style and difficulty pickers ---------- */
+.field-note {
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font);
+  font-weight: 500;
+  color: #aab6c8;
+}
+
+.class-pick {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.class-pick button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 4px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.class-pick button i {
+  font-style: normal;
+  font-size: 18px;
+}
+
+.class-pick button.active {
+  border-color: var(--accent);
+  background: rgba(124, 247, 212, 0.12);
+  box-shadow: 0 0 14px rgba(124, 247, 212, 0.25);
+}
+
+.chip-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-pick button {
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.chip-pick button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(124, 247, 212, 0.1);
+}
+
+.field.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.field.row2 > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field.row2 > div > span {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.join-row .btn {
+  flex: 1;
+}
+
+.player-list .cls,
+.hud-players .cls {
+  margin: 0 4px 0 2px;
+}
+
+/* ---------- Boss bar, abilities, data logs ---------- */
+#boss-bar {
+  position: absolute;
+  left: 50%;
+  top: 118px;
+  transform: translateX(-50%);
+  width: min(520px, 70vw);
+  text-align: center;
+  font-family: var(--display);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+#boss-bar b {
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #9dff6a;
+}
+
+#boss-bar .bar {
+  height: 10px;
+  margin: 5px 0 3px;
+  border-radius: 6px;
+  background: rgba(7, 11, 19, 0.75);
+  border: 1px solid rgba(157, 255, 106, 0.45);
+  overflow: hidden;
+}
+
+#boss-bar .bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4dff3a, #b6ff9a);
+  box-shadow: 0 0 14px #6dff4a;
+  transition: width 0.2s;
+}
+
+#boss-bar small {
+  font-size: 11px;
+  color: #cfe8c6;
+}
+
+#abilities {
+  position: absolute;
+  left: 50%;
+  bottom: 104px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.ability {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(7, 11, 19, 0.72);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.ability.ready {
+  border-color: #ffb14a;
+  color: #ffd08a;
+}
+
+.ability kbd {
+  font-size: 10px;
+}
+
+#log-card {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translateX(-50%);
+  width: min(460px, 86vw);
+  padding: 14px 16px;
+  border-color: rgba(255, 194, 74, 0.5);
+  animation: rise 0.4s ease both;
+}
+
+#log-card::before {
+  background: #ffc24a;
+  box-shadow: 0 0 12px #ffc24a;
+}
+
+#log-card .eyebrow {
+  color: #ffc24a;
+  font-size: 11px;
+}
+
+#log-card b {
+  display: block;
+  margin: 6px 0 4px;
+  font-family: var(--display);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+}
+
+#log-card p:last-child {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #d3dceb;
+}
+
+#downed .bar {
+  width: 220px;
+  height: 6px;
+  margin: 10px auto 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+#downed .bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #7cf7d4;
+  box-shadow: 0 0 10px #7cf7d4;
+}
+
+/* ---------- Armory and records ---------- */
+.armory-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.upgrade {
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.upgrade b {
+  font-family: var(--display);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.upgrade p {
+  margin: 0;
+  font-size: 13px;
+  color: #c3cddd;
+}
+
+.pips {
+  display: flex;
+  gap: 5px;
+}
+
+.pips i {
+  width: 26px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.pips i.on {
+  background: var(--gold);
+  box-shadow: 0 0 8px var(--gold);
+}
+
+.armory-class {
+  font-size: 13px;
+  color: #c3cddd;
+  line-height: 1.5;
+}
+
+.armory-class b {
+  color: var(--text);
+  font-family: var(--display);
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.tabs button {
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.board-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 46vh;
+  overflow: auto;
+}
+
+.board-list li {
+  display: grid;
+  grid-template-columns: 28px 1fr auto 80px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 14px;
+}
+
+.board-list li b {
+  font-family: var(--display);
+  color: var(--gold);
+}
+
+.board-list li em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.board-list li strong {
+  text-align: right;
+  font-family: var(--display);
+}
+
+.board-list li.me {
+  outline: 1px solid var(--accent);
+  background: rgba(124, 247, 212, 0.1);
+}
+
+.board-list li.empty {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  background: none;
+}
+
+.board-list.compact {
+  max-height: 26vh;
+  width: 100%;
+  text-align: left;
+}
+
+.victory-score {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.ach-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.ach-list li {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.ach-list li.got {
+  opacity: 1;
+  filter: none;
+  border-color: rgba(255, 209, 102, 0.5);
+  background: rgba(255, 209, 102, 0.06);
+}
+
+.ach-list li i {
+  grid-row: span 2;
+  font-style: normal;
+  font-size: 24px;
+  align-self: center;
+}
+
+.ach-list li b {
+  font-family: var(--display);
+  font-size: 14px;
+}
+
+.ach-list li span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- Touch: grenade button and phone layout for the new parts ---------- */
+.tbtn.grenade {
+  right: 172px;
+  bottom: 84px;
+  border-color: #ffb14a;
+}
+
+.tbtn.grenade.cooling {
+  opacity: 0.55;
+  font-size: 14px;
+}
+
+body.touch #abilities {
+  display: none;
+}
+
+@media (max-width: 900px), (max-height: 520px) {
+  #boss-bar {
+    top: 64px;
+    width: min(360px, 56vw);
+  }
+
+  #boss-bar small {
+    display: none;
+  }
+
+  .armory-list {
+    grid-template-columns: 1fr;
+  }
+
+  .class-pick button {
+    padding: 5px 2px;
+    font-size: 10px;
+  }
+
+  .board-list li {
+    grid-template-columns: 22px 1fr auto 64px;
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 700px) {
+  #boss-bar {
+    top: 128px;
+    width: 80vw;
+  }
+
+  .tbtn.grenade {
+    right: 150px;
+    bottom: 80px;
+  }
+
+  #log-card {
+    top: 34%;
+  }
+}
+
+/* The registration card scrolls on shorter desktop screens. */
+.menu-card {
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+@media (max-height: 820px) {
+  .menu-card {
+    gap: 10px;
+    padding: 18px;
+  }
+
+  .menu-card .card-head {
+    display: none;
+  }
+}

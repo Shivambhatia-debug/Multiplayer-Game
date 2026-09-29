@@ -1,5 +1,5 @@
 // Three interchangeable transports with the same tiny interface:
-//   connect({ room, id, meta })   send(data)   close()
+//   connect({ room, id, meta })   send(data)   updateMeta(meta)   close()
 //   onMessage(data, fromId)       onPresence(members[])   onError(message)
 // Members are { id, name, color, joinedAt } and the earliest joinedAt is the host.
 
@@ -14,7 +14,12 @@ class BaseTransport {
 /** Solo play: no network at all. */
 export class LocalTransport extends BaseTransport {
   async connect({ id, meta }) {
+    this.id = id;
     queueMicrotask(() => this.onPresence([{ id, ...meta, joinedAt: 1 }]));
+  }
+
+  updateMeta(meta) {
+    this.onPresence([{ id: this.id, ...meta, joinedAt: 1 }]);
   }
 
   send() {}
@@ -66,6 +71,10 @@ export class WsTransport extends BaseTransport {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'msg', data }));
   }
 
+  updateMeta(meta) {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'meta', meta }));
+  }
+
   close() {
     this.ws?.close();
   }
@@ -107,12 +116,17 @@ export class AblyTransport extends BaseTransport {
       this.onPresence(members.map((m) => ({ id: m.clientId, ...m.data })));
     };
     channel.presence.subscribe(() => refresh().catch(() => {}));
+    this.joinedAt = joinedAt;
     await channel.presence.enter({ ...meta, joinedAt });
     await refresh();
   }
 
   send(data) {
     this.channel?.publish('m', data).catch(() => {});
+  }
+
+  updateMeta(meta) {
+    this.channel?.presence.update({ ...meta, joinedAt: this.joinedAt }).catch(() => {});
   }
 
   close() {

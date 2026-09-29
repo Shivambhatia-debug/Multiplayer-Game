@@ -17,7 +17,17 @@
 - **Realistic Mars:** a wide, flat plain with a far horizon (the planet is 1.2 km in radius, so the ground no longer curves like a small ball), dunes, craters, distant mountain ranges, rust dust, dark basaltic sand, bump-mapped gravel, noise-shaped boulders, floating dust, dust devils, a butterscotch sky with blue sunsets, and the moons Phobos and Deimos. Rendering uses MSAA, bloom and a cinematic grade.
 - **Smooth on any device:** movement accelerates and brakes smoothly and the camera eases after you. Graphics has High, Medium and Low presets (phones and weaker PCs start on Medium), and the render resolution adapts automatically to keep the frame rate up.
 - **Plays on phones:** a floating thumb stick, drag-to-look and thumb buttons (Fire, Jump, Run, Build, Ping and Salvage), auto-fire with sticky aim (🎯 toggle), vibration on hits and damage, an adjustable look speed, and a layout that fits landscape and portrait screens. Phones use a Medium graphics preset (sharp resolution, 2x MSAA, soft shadows), and every camera, including the intro, widens its lens on narrow screens so nothing is cropped. Starting a mission on a phone switches to fullscreen landscape.
-- Every pilot has **health**. The Xal attack pilots, buildings and the reactor. A downed pilot respawns at the reactor after 6 seconds.
+- **The Xal** are armoured humanoid warriors with glowing plasma blades: fast **Stalkers** (green blade), huge **Juggernauts** (red double-bladed staff) and hooded **Casters** that throw acid from range.
+- **Pilot classes:** Engineer (30% cheaper turrets, repairs defences and the reactor nearby), Medic (heals everyone nearby, revives twice as fast), Heavy (170 health, double damage, slower) and Scout (faster, longer jetpack, extra energy from cells).
+- **Revive:** a downed pilot lies where they fell. Stand next to them to revive them in place; otherwise they respawn at the reactor after the bleed-out timer.
+- **Mothership boss** on waves 5 and 10: it circles the colony and calls in orbital strikes (dodge the green rings). Shoot the glowing core underneath.
+- **Armory upgrades** (rifle damage, fire rate) and a **plasma grenade** with a cooldown.
+- **Data logs:** gold light pillars mark six abandoned outposts. Walk in to recover the story of SENTINEL and bonus energy.
+- **Difficulty** (Easy, Normal, Nightmare), random **dust storms** that hide Xal ambushes, and a **daily challenge** with the same planet and waves for everyone.
+- **Leaderboards** (online with Upstash Redis, or this device's best runs) and 12 **achievements**.
+- **Customisation:** helmet (bubble, visor, tactical), suit pattern (plain, stripes, camo) and emotes (wave, cheer).
+- Adaptive music, radio voice lines, slow motion on big moments, and an installable **PWA** that plays Solo offline.
+- Every pilot has **health**. The Xal attack pilots, buildings and the reactor.
 - Room codes, invite links, drop-in/drop-out play and host migration. Everything is procedural, with no downloaded models, textures or sounds.
 
 ## How to play
@@ -31,6 +41,9 @@
 | Right click / `Esc` | Cancel building |
 | `X` | Salvage the nearest defence (50% refund) |
 | `Q` | Ping a spot for your team |
+| `G` | Plasma grenade |
+| `U` | Armory (upgrades) |
+| `T` / `Y` | Emotes: wave / cheer |
 | `H` / `M` | Field manual / mute |
 
 **On a phone or tablet:** drag on the left half of the screen to move (push to the edge to run), and drag on the right half to look. Hold **Fire** to shoot, tap **Jump** and hold it in the air for the jetpack, tap a slot at the bottom and then **Build** to place it, and tap **?** for the field manual. Add `?touch=1` to the URL to try the touch controls on a desktop.
@@ -97,6 +110,7 @@ Open http://localhost:5173 in two browser windows. Create a room in one and join
    - `ABLY_API_KEY`: the key from step 1
    - `ALLOWED_ORIGINS`: `https://<your-site>.netlify.app` (use `*` while you test)
 4. Deploy, then open `https://<project>.vercel.app/api/health`. It should return `{"ok":true,...,"realtime":"ably"}`.
+5. Optional, for online leaderboards: add a free **Upstash Redis** database (Vercel → Storage / Marketplace, or upstash.com) and set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Without them the game shows each player's own best runs.
 
 ### 3. Frontend on Netlify
 
@@ -129,15 +143,13 @@ client/                    Netlify site
   src/ui/hud.js            HUD, objectives, toasts
   src/audio.js             procedural music and sound effects
 server/                    Vercel project
-  api/                     config, token, health, rooms/[code]
+  api/                     config, token, health, scores, rooms/[code]
   ws-server.js             self-hosted relay (local dev / Render)
 netlify.toml               Netlify build config
 ```
 
 ## Roadmap to the next level
 
-1. **Story missions:** explore abandoned labs between waves for data logs about SENTINEL and upgrades.
-2. **Weapons and classes:** Engineer (repairs, cheaper turrets), Medic (heal beam), Heavy (shotgun). This gives each player a reason to coordinate.
-3. **Boss wave:** a Xal mothership that must be shot down from the comms tower.
-4. **Persistence:** an Upstash Redis leaderboard (through the Vercel Marketplace) of highest wave reached per player count.
-5. **Server-side validation:** if the game grows public, move the host simulation into a Durable Object or a small Fly.io service so no player can cheat as host.
+1. **More maps:** a second colony (polar ice base) with its own layout.
+2. **Weapon variety:** a shotgun for Heavies and a sniper rifle for Scouts.
+3. **Server-side validation:** if the game grows public, move the host simulation into a Durable Object or a small Fly.io service so no player can cheat as host.

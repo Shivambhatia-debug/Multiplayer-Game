@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { colonyFrame, localToDir } from '../sim/ruins.js';
 import { PLANET_RADIUS } from '../sim/terrain.js';
+import { CLASSES } from '../sim/defs.js';
 
 const WALK = 6;
 const SPRINT = 9.5;
@@ -39,6 +40,8 @@ export class LocalPlayer {
     this.camRadius = 0;
     /** Third-person distance; phones sit a little further back to see more of the fight. */
     this.camBase = CAM_DIST;
+    /** Pilot class id; changes speed and jetpack endurance. */
+    this.cls = 'engineer';
   }
 
   /** Drops the pilot on one of the four roads next to the reactor, facing out toward the wall. */
@@ -84,7 +87,7 @@ export class LocalPlayer {
     right.crossVectors(this.fwd, this.dir).normalize();
     desired.set(0, 0, 0);
     if (amount > 0.05) {
-      const speed = (this.sprinting ? SPRINT : WALK) * amount;
+      const speed = (this.sprinting ? SPRINT : WALK) * amount * (CLASSES[this.cls]?.speed || 1);
       desired.copy(this.fwd).multiplyScalar(f).addScaledVector(right, s).normalize().multiplyScalar(speed);
     }
     // Quick to start and stop on the ground, floaty in the air.
@@ -108,7 +111,7 @@ export class LocalPlayer {
     } else if (space && !this.grounded && this.fuel > 0 && this.vAlt < 3) {
       this.jetting = true;
       this.vAlt = Math.min(7, this.vAlt + JET_THRUST * dt);
-      this.fuel = Math.max(0, this.fuel - JET_BURN * dt);
+      this.fuel = Math.max(0, this.fuel - JET_BURN * (CLASSES[this.cls]?.jet || 1) * dt);
     }
     if (this.grounded) this.fuel = Math.min(1, this.fuel + JET_REFILL * dt);
     this.vAlt -= GRAVITY * dt;
