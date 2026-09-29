@@ -16,6 +16,8 @@ import {
   buildAvatar,
   animateHuman,
   buildAlien,
+  animateXal,
+  XAL_CHEST,
   buildReactor,
   hash01,
 } from './models.js';
@@ -406,7 +408,7 @@ export class GameRenderer {
     if (now >= entry.fireAt) {
       entry.fireAt = now + TUNING.turretRate;
       const muzzle = entry.head.localToWorld(new THREE.Vector3(0, 0, 1.4));
-      const hit = best.obj.position.clone().addScaledVector(best.up, best.kind === 1 ? 1.8 : 0.8);
+      const hit = best.obj.position.clone().addScaledVector(best.up, XAL_CHEST[best.kind]);
       this.fx.beam(muzzle, hit, 0xff7a4a);
     }
   }
@@ -477,9 +479,6 @@ export class GameRenderer {
       let entry = this.enemies.get(e.id);
       if (!entry) {
         const obj = buildAlien(e.kind);
-        obj.traverse((o) => {
-          if (o.isMesh) o.castShadow = true;
-        });
         this.entities.add(obj);
         entry = {
           obj,
@@ -490,6 +489,8 @@ export class GameRenderer {
           data: obj.userData,
           phase: hash01(e.id) * 10,
           flash: 0,
+          gait: 0,
+          speed: 0,
           born: this.clock,
         };
         this.enemies.set(e.id, entry);
@@ -498,6 +499,7 @@ export class GameRenderer {
       }
       const target = tmpV.set(...e.dir);
       const move = tmpV3.copy(target).sub(entry.up);
+      const stepMetres = move.length() * R * k;
       if (move.lengthSq() > 1e-9) {
         move.addScaledVector(entry.up, -move.dot(entry.up));
         if (move.lengthSq() > 1e-10) entry.fwd.lerp(move.normalize(), 0.15);
@@ -513,21 +515,18 @@ export class GameRenderer {
       entry.obj.position.copy(entry.up).multiplyScalar(r);
       face(entry.obj, entry.up, entry.fwd);
 
-      const t = this.clock * (e.kind === 0 ? 14 : e.kind === 1 ? 6 : 9) + entry.phase;
-      entry.body.scale.setScalar(Math.min(1, (this.clock - entry.born) / 0.4));
-      entry.data.legs.forEach((leg, i) => {
-        leg.rotation.x = Math.sin(t + i * 1.7) * (e.attacking ? 0.15 : 0.45);
-      });
-      if (e.attacking) {
-        entry.body.rotation.x = Math.sin(t * 1.5) * 0.18;
-        entry.body.position.y = Math.abs(Math.sin(t * 1.5)) * 0.1;
-      } else {
-        entry.body.rotation.x = 0;
-        entry.body.position.y = Math.abs(Math.sin(t)) * 0.06;
-      }
-      if (entry.data.sac) entry.data.sac.scale.set(0.8, 0.8, 0.9).multiplyScalar(1 + Math.sin(t * 0.7) * 0.12);
+      // Gait follows real ground speed so feet plant; attacks run on their own clock.
+      const speed = dt > 0 ? stepMetres / dt : 0;
+      entry.speed = (entry.speed || 0) + (speed - (entry.speed || 0)) * (1 - Math.exp(-10 * dt));
+      const running = !e.attacking && entry.speed > 0.4;
+      const perRadian = 0.45 * entry.data.scale;
+      if (e.attacking) entry.gait += dt * (e.kind === 1 ? 3.5 : e.kind === 0 ? 5.5 : 3);
+      else entry.gait += running ? (dt * entry.speed) / perRadian : dt;
+      animateXal(entry.data.rig, e.kind, e.attacking ? 'attack' : running ? 'run' : 'idle', entry.gait + entry.phase);
+      entry.body.scale.setScalar(entry.data.scale * Math.min(1, (this.clock - entry.born) / 0.4));
+      if (entry.data.sac) entry.data.sac.scale.set(0.42, 0.5, 0.36).multiplyScalar(1 + Math.sin(this.clock * 3 + entry.phase) * 0.1);
       entry.flash = Math.max(0, entry.flash - dt * 5);
-      entry.data.skin.emissiveIntensity = 0.4 + entry.flash * 8;
+      entry.data.skin.emissiveIntensity = 0.15 + entry.flash * 6;
     }
   }
 

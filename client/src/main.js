@@ -17,6 +17,7 @@ import { Juice } from './ui/juice.js';
 import { Intro } from './render/intro.js';
 import { RESCUE } from './render/survivors.js';
 import { fitFov } from './render/fov.js';
+import { XAL_CHEST } from './render/models.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -500,7 +501,7 @@ function handleEvents(events) {
         const p = new THREE.Vector3(...ev.pos);
         sound.play('squish', proximity(p.clone().normalize().toArray()));
         if (ev.bounty) juice.float(p, `+${ev.bounty}⚡`, '#7dff5a');
-        if (ev.pid === meId) onMyKill(ev.kind === 1 ? 'Brute down' : null);
+        if (ev.pid === meId) onMyKill(ev.kind === 1 ? 'Juggernaut down' : null);
         break;
       }
       case 'hurt':
@@ -596,7 +597,7 @@ function findTarget(world) {
   for (const e of world.enemies.values()) {
     const entry = renderer.enemies.get(e.id);
     if (!entry) continue;
-    const lift = e.kind === 1 ? 1.9 : e.kind === 2 ? 1.8 : 0.8;
+    const lift = XAL_CHEST[e.kind];
     consider(e.id, entry.obj.position.clone().addScaledVector(entry.up, lift), 0.17);
   }
   return best;

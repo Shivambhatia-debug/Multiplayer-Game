@@ -24,10 +24,6 @@ export const mats = {
     depthWrite: false,
   }),
   cell: std(0x8ff7ff, { emissive: 0x2fe6ff, emissiveIntensity: 3.6, roughness: 0.2 }),
-  chitin: std(0x1c2622, { emissive: 0x0b3a1c, emissiveIntensity: 0.4, flatShading: true, roughness: 0.45, metalness: 0.2 }),
-  bruteHide: std(0x2a2330, { emissive: 0x2a0b1a, emissiveIntensity: 0.4, flatShading: true, roughness: 0.6 }),
-  alienEye: std(0x9dff6a, { emissive: 0x6dff3a, emissiveIntensity: 7 }),
-  bruteEye: std(0xff6a3a, { emissive: 0xff3a1a, emissiveIntensity: 7 }),
   sac: std(0xb6ff5a, { emissive: 0x7dff2a, emissiveIntensity: 3, transparent: true, opacity: 0.9 }),
   podShell: std(0x1a1f1c, { emissive: 0x2dff6a, emissiveIntensity: 1.4, flatShading: true, roughness: 0.4, fog: false }),
   trail: new THREE.MeshBasicMaterial({
@@ -228,59 +224,252 @@ export function buildWarning() {
 }
 
 /**
- * The Xal. 0 = drone (fast six-legged hunter), 1 = brute (hulking tank),
- * 2 = spitter (tall, with a glowing acid sac). Returns a group with a `body`
- * child for animation, `legs` for gait and a per-alien `skin` material for hit flashes.
+ * The Xal: armoured humanoid warriors with plasma blades.
+ * 0 = Stalker (lean, fast, one green blade), 1 = Juggernaut (huge, red double-bladed staff),
+ * 2 = Caster (tall, hooded, violet orb staff and an acid sac; attacks from range).
+ * Returns a group with a `body` child (scaled per kind) and userData { rig, skin, sac, kind, scale }.
  */
+const XAL = [
+  { scale: 1.05, blade: 0x4dff6a, eye: 0x9dff6a, armor: 0x1a2420, plate: 0x0d1411, vein: 0x2dff6a },
+  { scale: 1.45, blade: 0xff2a2a, eye: 0xff6a3a, armor: 0x2a1f24, plate: 0x140c10, vein: 0xff3a2a },
+  { scale: 1.15, blade: 0xb45aff, eye: 0xd49aff, armor: 0x221c2c, plate: 0x110d18, vein: 0xa04aff },
+];
+const bladeGeo = {
+  core: new THREE.CylinderGeometry(0.018, 0.018, 1, 8),
+  glow: new THREE.CylinderGeometry(0.055, 0.04, 1, 10, 1, true),
+  hilt: new THREE.CylinderGeometry(0.03, 0.035, 1, 8),
+  orb: new THREE.SphereGeometry(0.5, 16, 12),
+};
+const bladeMats = new Map();
+function bladeMaterials(color) {
+  if (!bladeMats.has(color)) {
+    const c = new THREE.Color(color);
+    bladeMats.set(color, {
+      core: new THREE.MeshBasicMaterial({ color: c.clone().lerp(new THREE.Color(0xffffff), 0.65).multiplyScalar(3) }),
+      glow: new THREE.MeshBasicMaterial({
+        color: c.clone().multiplyScalar(2.2),
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    });
+  }
+  return bladeMats.get(color);
+}
+
+/** A glowing plasma blade along +y from `y0`, `length` metres long. */
+function plasmaBlade(color, length, y0 = 0, dir = 1) {
+  const m = bladeMaterials(color);
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(bladeGeo.core, m.core);
+  core.scale.set(1, length, 1);
+  core.position.y = y0 + (dir * length) / 2;
+  const glow = new THREE.Mesh(bladeGeo.glow, m.glow);
+  glow.scale.set(1, length * 1.02, 1);
+  glow.position.y = core.position.y;
+  g.add(core, glow);
+  return g;
+}
+
+/** Limb segment for the Xal: shares the capsule geometry, no shadow (cheap for big waves). */
+function xalSeg(parent, mat, radius, length, y) {
+  const pivot = new THREE.Group();
+  pivot.position.y = y;
+  const seg = new THREE.Mesh(geo.capsule, mat);
+  seg.scale.set(radius / 0.4, length / 1.5, radius / 0.4);
+  seg.position.y = -length / 2;
+  pivot.add(seg);
+  parent.add(pivot);
+  return pivot;
+}
+
+const xalShared = new Map();
+function xalMaterials(kind) {
+  if (!xalShared.has(kind)) {
+    const d = XAL[kind];
+    xalShared.set(kind, {
+      plate: std(d.plate, { metalness: 0.75, roughness: 0.3 }),
+      vein: std(d.vein, { emissive: d.vein, emissiveIntensity: 2.6 }),
+      eye: std(d.eye, { emissive: d.eye, emissiveIntensity: 7 }),
+      cloth: std(0x15121c, { roughness: 0.9, side: THREE.DoubleSide }),
+    });
+  }
+  return xalShared.get(kind);
+}
+
 export function buildAlien(kind) {
+  const d = XAL[kind];
+  const shared = xalMaterials(kind);
+  // Armour gets its own material per alien so hits can flash it.
+  const skin = std(d.armor, { metalness: 0.55, roughness: 0.32, emissive: d.vein, emissiveIntensity: 0.15 });
   const g = new THREE.Group();
   const body = new THREE.Group();
   body.name = 'body';
-  const skin = (kind === 1 ? mats.bruteHide : mats.chitin).clone();
-  const eye = kind === 1 ? mats.bruteEye : mats.alienEye;
+  body.scale.setScalar(d.scale);
+  g.add(body);
+
+  const hips = new THREE.Group();
+  hips.position.y = 0.98;
+  body.add(hips);
   const legs = [];
-  const leg = (x, z, len, thick, spread) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, 0.55 * len, z);
-    const l = part(geo.cyl6, skin, [thick, len, thick], [0, -len * 0.45, 0]);
-    pivot.add(l);
-    pivot.rotation.z = spread;
-    body.add(pivot);
-    legs.push(pivot);
-  };
-  if (kind === 0) {
-    body.add(part(geo.ico1, skin, [0.9, 0.55, 1.3], [0, 0.75, 0]));
-    body.add(part(geo.ico, skin, [0.55, 0.45, 0.6], [0, 0.85, 0.8]));
-    for (const x of [-0.14, 0.14]) body.add(part(geo.sphere, eye, [0.12, 0.12, 0.12], [x, 0.95, 1.08], false));
-    for (const x of [-0.12, 0.12]) body.add(part(geo.cone, skin, [0.08, 0.5, 0.08], [x, 0.7, 1.2]));
-    for (const z of [-0.4, 0, 0.4]) {
-      leg(0.4, z, 1.1, 0.07, 0.9);
-      leg(-0.4, z, 1.1, 0.07, -0.9);
-    }
-  } else if (kind === 1) {
-    body.add(part(geo.ico1, skin, [1.9, 1.7, 1.6], [0, 1.9, 0]));
-    body.add(part(geo.ico, skin, [0.9, 0.8, 0.9], [0, 2.3, 0.95]));
-    for (const x of [-0.22, 0.22]) body.add(part(geo.sphere, eye, [0.16, 0.16, 0.16], [x, 2.4, 1.38], false));
-    for (const x of [-1.05, 1.05]) body.add(part(geo.box, skin, [0.5, 1.7, 0.55], [x, 1.3, 0.4]));
-    for (let i = 0; i < 5; i++) body.add(part(geo.cone, skin, [0.22, 0.8, 0.22], [(i - 2) * 0.35, 2.75, -0.35 - Math.abs(i - 2) * 0.1]));
-    leg(0.5, -0.2, 1.3, 0.3, 0.15);
-    leg(-0.5, -0.2, 1.3, 0.3, -0.15);
-  } else {
-    body.add(part(geo.ico1, skin, [0.7, 1.3, 0.7], [0, 1.6, 0]));
-    body.add(part(geo.cyl6, skin, [0.2, 0.9, 0.2], [0, 2.5, 0.2]));
-    body.add(part(geo.ico, skin, [0.45, 0.4, 0.6], [0, 2.95, 0.4]));
-    for (const x of [-0.12, 0.12]) body.add(part(geo.sphere, eye, [0.1, 0.1, 0.1], [x, 3.02, 0.68], false));
-    const sac = part(geo.sphere, mats.sac, [0.8, 0.8, 0.9], [0, 1.7, -0.55], false);
+  const knees = [];
+  for (const x of [-0.13, 0.13]) {
+    const hip = new THREE.Group();
+    hip.position.x = x;
+    hips.add(hip);
+    const thigh = xalSeg(hip, skin, 0.1, 0.48, 0);
+    thigh.add(part(geo.box, shared.plate, [0.2, 0.26, 0.12], [0, -0.2, 0.07], false));
+    const knee = xalSeg(thigh, skin, 0.08, 0.46, -0.48);
+    knee.add(part(geo.cone, shared.plate, [0.12, 0.16, 0.12], [0, 0.02, 0.08], false).rotateX(-0.4));
+    knee.add(part(geo.box, shared.plate, [0.13, 0.08, 0.3], [0, -0.48, 0.07], false));
+    legs.push(thigh);
+    knees.push(knee);
+  }
+
+  const torso = new THREE.Group();
+  hips.add(torso);
+  const chest = part(geo.capsule, skin, [kind === 1 ? 0.7 : 0.55, 0.36, 0.42], [0, 0.34, 0], true);
+  torso.add(chest);
+  torso.add(part(geo.box, shared.plate, [0.5, 0.28, 0.12], [0, 0.42, 0.17], false));
+  torso.add(part(geo.box, shared.vein, [0.04, 0.26, 0.02], [0, 0.4, 0.235], false));
+  torso.add(part(geo.box, shared.vein, [0.36, 0.025, 0.02], [0, 0.28, 0.235], false));
+  // Shoulder pauldrons, swept back.
+  for (const side of [-1, 1]) {
+    const pad = part(geo.ico, shared.plate, [0.3, 0.2, 0.34], [side * 0.34, 0.66, -0.02], false);
+    pad.rotation.z = side * 0.5;
+    torso.add(pad);
+  }
+  if (kind === 1) {
+    // Juggernaut: spiked back plates.
+    for (let i = 0; i < 4; i++) torso.add(part(geo.cone, shared.plate, [0.1, 0.36, 0.1], [(i - 1.5) * 0.14, 0.72, -0.22], false).rotateX(-0.6));
+  }
+  if (kind === 2) {
+    // Caster: a ragged cloak and a glowing acid sac on the back.
+    const cloak = part(geo.cone, shared.cloth, [0.8, 1.1, 0.55], [0, 0.08, -0.08], false);
+    torso.add(cloak);
+    const sac = part(geo.sphere, mats.sac, [0.42, 0.5, 0.36], [0, 0.46, -0.3], false);
     sac.name = 'sac';
-    body.add(sac);
-    for (const z of [-0.3, 0.3]) {
-      leg(0.3, z, 1.4, 0.08, 0.5);
-      leg(-0.3, z, 1.4, 0.08, -0.5);
+    torso.add(sac);
+  }
+
+  // Elongated head with a swept crest and a glowing visor slit.
+  const head = new THREE.Group();
+  head.position.y = 0.8;
+  torso.add(head);
+  head.add(part(geo.sphere, skin, [0.24, 0.3, 0.34], [0, 0.04, 0.02], true));
+  head.add(part(geo.box, shared.plate, [0.22, 0.1, 0.16], [0, -0.05, 0.12], false));
+  head.add(part(geo.box, shared.eye, [0.2, 0.035, 0.03], [0, 0.07, 0.18], false));
+  for (let i = 0; i < 3; i++) {
+    const crest = part(geo.cone, shared.plate, [0.07, 0.34 - i * 0.06, 0.07], [0, 0.2 - i * 0.02, -0.06 - i * 0.1], false);
+    crest.rotation.x = -1.1 - i * 0.15;
+    head.add(crest);
+  }
+  if (kind === 2) head.add(part(geo.cone, shared.cloth, [0.4, 0.46, 0.44], [0, 0.18, -0.04], false));
+
+  const arms = [];
+  const elbows = [];
+  for (const side of [-1, 1]) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * (kind === 1 ? 0.36 : 0.3), 0.6, 0);
+    torso.add(shoulder);
+    const upper = xalSeg(shoulder, skin, 0.08, 0.34, 0);
+    const fore = xalSeg(upper, skin, 0.07, 0.32, -0.34);
+    fore.add(part(geo.box, shared.plate, [0.15, 0.22, 0.15], [0, -0.14, 0], false));
+    fore.add(part(geo.sphere, shared.plate, [0.11, 0.12, 0.11], [0, -0.35, 0], false));
+    arms.push(upper);
+    elbows.push(fore);
+  }
+
+  // The weapon sits in the right hand, pointing forward along the forearm.
+  const weapon = new THREE.Group();
+  weapon.position.set(0, -0.36, 0.02);
+  weapon.rotation.x = Math.PI / 2;
+  elbows[1].add(weapon);
+  const hilt = new THREE.Mesh(bladeGeo.hilt, shared.plate);
+  if (kind === 0) {
+    hilt.scale.set(1, 0.26, 1);
+    weapon.add(hilt, plasmaBlade(d.blade, 1.05, 0.13));
+  } else if (kind === 1) {
+    // Double-bladed staff held at the centre.
+    hilt.scale.set(1.2, 0.7, 1.2);
+    weapon.add(hilt, plasmaBlade(d.blade, 1.1, 0.35), plasmaBlade(d.blade, 1.1, -0.35, -1));
+  } else {
+    // A staff crowned with a violet orb and a short blade.
+    hilt.scale.set(0.9, 1.5, 0.9);
+    hilt.position.y = 0.2;
+    const orb = new THREE.Mesh(bladeGeo.orb, bladeMaterials(d.blade).core);
+    orb.scale.setScalar(0.16);
+    orb.position.y = 0.98;
+    const halo = new THREE.Mesh(bladeGeo.orb, bladeMaterials(d.blade).glow);
+    halo.scale.setScalar(0.34);
+    halo.position.y = 0.98;
+    weapon.add(hilt, orb, halo, plasmaBlade(d.blade, 0.35, -0.55, -1));
+  }
+
+  g.userData = { rig: { hips, torso, head, legs, knees, arms, elbows, weapon }, skin, kind, scale: d.scale, sac: torso.getObjectByName('sac') };
+  return g;
+}
+
+/** Chest height (metres) of each kind, where shots and turret bolts aim. */
+export const XAL_CHEST = [1.35, 1.95, 1.5];
+
+/**
+ * Poses a Xal. `state`: idle | run | attack. `t` is the gait/attack clock.
+ * Stalkers slash, Juggernauts spin their staff, Casters raise the orb and cast.
+ */
+export function animateXal(rig, kind, state, t) {
+  const { hips, torso, head, legs, knees, arms, elbows, weapon } = rig;
+  const s = Math.sin(t);
+  const c = Math.cos(t);
+  let stride = state === 'run' ? 0.9 : 0;
+  legs[0].rotation.x = s * stride;
+  legs[1].rotation.x = -s * stride;
+  knees[0].rotation.x = Math.max(0, -c) * stride * 1.3;
+  knees[1].rotation.x = Math.max(0, c) * stride * 1.3;
+  hips.position.y = 0.98 + (stride ? Math.abs(c) * 0.06 : Math.sin(t * 0.3) * 0.01);
+  torso.rotation.set(stride ? 0.28 : 0.08, 0, 0);
+  head.rotation.set(stride ? -0.2 : 0, 0, 0);
+  // Off hand swings; blade hand held low and forward, ready to strike.
+  arms[0].rotation.set(-s * stride * 0.8, 0, -0.2);
+  elbows[0].rotation.set(-0.5, 0, 0);
+  arms[1].rotation.set(-0.7 + s * stride * 0.2, 0, 0.35);
+  elbows[1].rotation.set(-0.6, 0, 0);
+  weapon.rotation.set(Math.PI / 2 + 0.5, 0, 0);
+
+  if (state === 'attack') {
+    // Crouched stance.
+    legs[0].rotation.x = -0.45;
+    legs[1].rotation.x = 0.25;
+    knees[0].rotation.x = 0.7;
+    knees[1].rotation.x = 0.5;
+    hips.position.y = 0.88;
+    const k = (t % (Math.PI * 2)) / (Math.PI * 2);
+    if (kind === 0) {
+      // Wind up slowly, slash down fast.
+      const swing = k < 0.65 ? k / 0.65 : 1 - (k - 0.65) / 0.35;
+      arms[1].rotation.set(-2.6 * swing + 0.3, 0, 0.5 - swing * 0.3);
+      elbows[1].rotation.set(-0.9 * swing, 0, 0);
+      torso.rotation.set(0.2, -0.5 + swing * 0.7, 0);
+    } else if (kind === 1) {
+      // Twirl the double staff in front of the body.
+      arms[1].rotation.set(-1.3, 0, 0.3);
+      elbows[1].rotation.set(-0.4, 0, 0);
+      weapon.rotation.set(Math.PI / 2, t * 2.2, 0);
+      arms[0].rotation.set(-1.1, 0, -0.3);
+      torso.rotation.set(0.15, Math.sin(t * 0.5) * 0.3, 0);
+    } else {
+      // Raise the orb and thrust the off hand forward to cast.
+      arms[1].rotation.set(-2.4, 0, 0.2);
+      elbows[1].rotation.set(-0.2, 0, 0);
+      weapon.rotation.set(Math.PI / 2 - 1.2, 0, 0);
+      const push = Math.max(0, Math.sin(t * 1.5));
+      arms[0].rotation.set(-1.4 - push * 0.2, 0, -0.1);
+      elbows[0].rotation.set(-0.2 + push * 0.2, 0, 0);
+      torso.rotation.set(-0.05, 0, 0);
     }
   }
-  g.add(body);
-  g.userData = { skin, legs, sac: body.getObjectByName('sac') };
-  return g;
 }
 
 function labelTexture(name, color) {

@@ -32,11 +32,11 @@ export const STRUCTURES = {
   },
 };
 
-/** The Xal. `dmg` is per second for melee kinds and per spit for the spitter. */
+/** The Xal. `dmg` is per second for blade fighters and per acid bolt for the Caster. */
 export const ENEMIES = [
-  { name: 'Xal Drone', hp: 3, speed: 3.8, dmg: 14, reach: 1.6, bounty: 3 },
-  { name: 'Xal Brute', hp: 14, speed: 2.1, dmg: 36, reach: 2.4, bounty: 12 },
-  { name: 'Xal Spitter', hp: 4, speed: 2.7, dmg: 12, reach: 15, bounty: 6, rate: 2 },
+  { name: 'Xal Stalker', hp: 3, speed: 3.8, dmg: 14, reach: 1.6, bounty: 3 },
+  { name: 'Xal Juggernaut', hp: 14, speed: 2.1, dmg: 36, reach: 2.4, bounty: 12 },
+  { name: 'Xal Caster', hp: 4, speed: 2.7, dmg: 12, reach: 15, bounty: 6, rate: 2 },
 ];
 
 export const TUNING = {
@@ -83,10 +83,10 @@ export const STORY = [
 /** Radio chatter from colony command at the start of each wave. */
 export const RADIO = [
   'Reyes here. Scanners show movement. Get to the reactor and dig in!',
-  'Drones on approach. Turrets will buy you time. Build them!',
+  'Stalkers on approach, blades drawn. Turrets will buy you time. Build them!',
   'They are dropping pods from orbit. Shoot them before they land!',
-  'Big signature incoming. That is a Brute. Focus fire!',
-  'Spitters in this wave. They hit from range, so do not stand in the open.',
+  'Big signature incoming. That is a Juggernaut with a double blade. Focus fire!',
+  'Casters in this wave. They throw acid from range, so do not stand in the open.',
   'Beacon at 50%. Halfway there, pilots. Hold the line!',
   'SENTINEL is jamming our comms. Keep that reactor running!',
   'They are throwing everything at us now. Stay together!',
