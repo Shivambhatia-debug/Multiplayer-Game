@@ -2510,3 +2510,152 @@ body.touch .hud-right {
     width: 88vw;
   }
 }
+
+/* ---------- Portrait phones: compact HUD and a menu that fits above the fold ---------- */
+@media (orientation: portrait) and (max-width: 700px) {
+  /* Vitals become a slim two-by-two card: health | reactor, energy | wave. */
+  #vitals {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    width: min(64vw, 260px);
+    padding: 8px 10px;
+  }
+
+  #vitals .vital {
+    gap: 2px;
+  }
+
+  #vitals .vital-row span,
+  #vitals .label {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  #vitals .vital-row b {
+    font-size: 13px;
+  }
+
+  #vitals .bar.big {
+    height: 5px;
+  }
+
+  #vitals .energy-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  #vitals .energy b {
+    font-size: 17px !important;
+  }
+
+  #vitals .meta {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font-size: 10px;
+  }
+
+  #vitals .meta-row {
+    font-size: 10px;
+  }
+
+  #vitals .meta-row:last-child {
+    display: none;
+  }
+
+  /* The objective wraps onto two lines instead of being cut off. */
+  #objective {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.35;
+    border-radius: 12px;
+    max-width: 86vw;
+  }
+
+  #compass-wrap {
+    width: 86vw;
+    bottom: calc(50% + 70px);
+  }
+
+  /* Menu: shorter brand block so the registration card is visible without scrolling. */
+  #menu {
+    justify-content: flex-start;
+    gap: 14px;
+  }
+
+  #menu h1 {
+    font-size: 56px;
+    margin: 6px 0 8px;
+  }
+
+  #menu .tagline {
+    font-size: 14px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  #menu .chips {
+    display: none;
+  }
+
+  .menu-card {
+    gap: 10px;
+    padding: 16px;
+  }
+
+  .menu-card .card-head {
+    display: none;
+  }
+
+  .menu-card .swatch {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Mission briefing: tighter cards. */
+  .briefing > div {
+    padding: 10px 12px;
+  }
+
+  .briefing p {
+    font-size: 13px;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 700px) {
+  #vitals {
+    width: min(58vw, 240px);
+  }
+
+  #vitals .long-label {
+    display: none;
+  }
+
+  #vitals .vital-row,
+  #vitals .meta-row {
+    gap: 4px;
+  }
+
+  #vitals .vital-row span,
+  #vitals .meta-row span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #vitals .meta-row b {
+    white-space: nowrap;
+  }
+}
